@@ -334,14 +334,18 @@ export default function CreateSessionForm({
 
       {/* Navigation */}
       <div className="flex items-center justify-between border-t border-neutral-800 pt-3">
-        <button
-          type="button"
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
-          disabled={step === 0 || busy}
-          className="rounded border border-neutral-700 px-4 py-2 text-sm disabled:opacity-40"
-        >
-          Back
-        </button>
+        {step === 0 ? (
+          <span aria-hidden />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            disabled={busy}
+            className="rounded border border-neutral-700 px-4 py-2 text-sm disabled:opacity-40"
+          >
+            Back
+          </button>
+        )}
         {step < STEPS.length - 1 ? (
           <button
             type="button"

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.base import get_session
 from app.db.models import (
     Event,
@@ -24,10 +25,12 @@ from app.db.models import (
     Scorecard,
     SessionParticipant,
     SessionStatus,
+    Transcript,
 )
 from app.redis_client import publish, session_channel
 from app.schemas import (
     GUARDRAIL_PRESETS,
+    CandidateSessionLog,
     EventOut,
     JoinRequest,
     JoinResult,
@@ -39,6 +42,7 @@ from app.schemas import (
     SessionOut,
     SessionSummary,
     TestResult,
+    TranscriptOut,
 )
 from app.security import get_current_profile, require_role
 from app.services import executor, telemetry
@@ -104,6 +108,30 @@ async def list_sessions(
     return list(rows)
 
 
+@router.get("/mine", response_model=list[CandidateSessionLog])
+async def list_my_candidate_sessions(
+    candidate: Annotated[Profile, Depends(require_role(Role.candidate))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[InterviewSession]:
+    """Privacy-stripped session log for the candidate dashboard.
+
+    Returns sessions where the caller participated as a candidate. The response schema
+    (`CandidateSessionLog`) deliberately omits problem text, code, transcripts, scorecard,
+    language, join code, and interviewer identity — candidates see only the kind of interview
+    and when it happened.
+    """
+    rows = await db.scalars(
+        select(InterviewSession)
+        .join(SessionParticipant, SessionParticipant.session_id == InterviewSession.id)
+        .where(
+            SessionParticipant.profile_id == candidate.id,
+            SessionParticipant.role == Role.candidate,
+        )
+        .order_by(InterviewSession.created_at.desc())
+    )
+    return list(rows)
+
+
 @router.post("/join", response_model=JoinResult)
 async def join_session(
     body: JoinRequest,
@@ -159,9 +187,14 @@ async def get_session_view(
     if participant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant")
 
+    model_name = get_settings().anthropic_model
     if profile.role == Role.interviewer and interview.created_by == profile.id:
-        return SessionOut.model_validate(interview)
-    return SessionCandidateView.model_validate(interview)
+        out = SessionOut.model_validate(interview)
+        out.ai_model = model_name
+        return out
+    cv = SessionCandidateView.model_validate(interview)
+    cv.ai_model = model_name
+    return cv
 
 
 @router.get("/{session_id}/scorecard", response_model=ScorecardOut)
@@ -260,5 +293,22 @@ async def list_session_events(
     await _require_participant(session_id, interviewer, db)
     rows = await db.scalars(
         select(Event).where(Event.session_id == session_id).order_by(Event.created_at)
+    )
+    return list(rows)
+
+
+@router.get("/{session_id}/transcripts", response_model=list[TranscriptOut])
+async def list_session_transcripts(
+    session_id: uuid.UUID,
+    interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[Transcript]:
+    """Full chat history for the post-mortem summary view. Interviewer-only because the
+    `was_hallucinated` flag must never reach a candidate."""
+    await _require_participant(session_id, interviewer, db)
+    rows = await db.scalars(
+        select(Transcript)
+        .where(Transcript.session_id == session_id)
+        .order_by(Transcript.created_at)
     )
     return list(rows)

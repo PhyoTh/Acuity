@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type {
+  CandidateSessionLog,
   EventRow,
   Profile,
   Role,
@@ -11,6 +12,7 @@ import type {
   SessionConfig,
   SessionCreateInput,
   SessionSummary,
+  TranscriptTurn,
 } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL!;
@@ -39,9 +41,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => request<Profile>("/auth/me"),
+  updateMe: (body: { display_name: string }) =>
+    request<Profile>("/auth/me", { method: "PATCH", body: JSON.stringify(body) }),
   createSession: (body: SessionCreateInput) =>
     request<SessionConfig>("/sessions", { method: "POST", body: JSON.stringify(body) }),
   listSessions: () => request<SessionSummary[]>("/sessions"),
+  listMyCandidateSessions: () => request<CandidateSessionLog[]>("/sessions/mine"),
   joinSession: (joinCode: string) =>
     request<{ session_id: string; role: Role }>("/sessions/join", {
       method: "POST",
@@ -55,4 +60,5 @@ export const api = {
       body: JSON.stringify({ code }),
     }),
   getEvents: (id: string) => request<EventRow[]>(`/sessions/${id}/events`),
+  getTranscripts: (id: string) => request<TranscriptTurn[]>(`/sessions/${id}/transcripts`),
 };

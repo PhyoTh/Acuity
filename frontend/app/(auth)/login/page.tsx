@@ -27,7 +27,7 @@ export default function LoginPage() {
     }
     try {
       const me = await api.me();
-      router.push(me.role === "interviewer" ? "/dashboard" : "/");
+      router.push(me.role === "interviewer" ? "/dashboard" : "/candidate");
     } catch {
       router.push("/");
     }

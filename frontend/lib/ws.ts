@@ -6,6 +6,7 @@ export type SessionEventType =
   | "chat_message"
   | "ai_response"
   | "interview_end"
+  | "interview_ended" // server -> session: status flipped to ended, immediate (before scorecard)
   | "scorecard_ready"
   | "paste" // candidate -> server: large paste detected
   | "paste_flag" // server -> interviewer: cheat flag

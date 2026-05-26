@@ -5,11 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
+import AIInfoHeader from "@/components/Chat/AIInfoHeader";
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
+import DisplayNameModal from "@/components/DisplayNameModal";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { RunResult } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
+
+function nameConfirmedKey(sessionId: string): string {
+  return `devlens:display-name-confirmed:${sessionId}`;
+}
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
@@ -48,6 +54,13 @@ export default function CandidateSessionPage() {
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
   const [admitted, setAdmitted] = useState<boolean | null>(null);
   const [kicked, setKicked] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [nameReady, setNameReady] = useState(false);
+  const [defaultName, setDefaultName] = useState("");
+  const [aiModel, setAiModel] = useState<string>("");
+  const [guardrailPreset, setGuardrailPreset] = useState<string>("");
+  const [hallucinationPct, setHallucinationPct] = useState<number>(0);
 
   const socketRef = useRef<SessionSocket | null>(null);
   const codeRef = useRef("");
@@ -55,7 +68,60 @@ export default function CandidateSessionPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myProfileIdRef = useRef<string | null>(null);
 
+  // Bootstrap: load profile + session config, decide whether to show the display-name modal.
+  // The WS connection is gated on `nameReady` so the participant broadcast carries the final name.
   useEffect(() => {
+    let active = true;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token ?? null;
+      const uid = data.session?.user.id ?? null;
+      setToken(accessToken);
+      setMyProfileId(uid);
+      myProfileIdRef.current = uid;
+      if (!accessToken) {
+        setStatus("not signed in");
+        return;
+      }
+      try {
+        const [me, interview] = await Promise.all([api.me(), api.getSession(sessionId)]);
+        if (!active) return;
+        setDefaultName(me.display_name ?? "");
+        if ("language" in interview) {
+          setLanguage(interview.language);
+          languageRef.current = interview.language;
+        }
+        if ("prompt" in interview) setPrompt(interview.prompt);
+        if ("starting_code" in interview && interview.starting_code) {
+          setCode(interview.starting_code);
+          codeRef.current = interview.starting_code;
+        }
+        if ("token_budget" in interview && interview.token_budget > 0) {
+          setBudget({
+            used: 0,
+            budget: interview.token_budget,
+            remaining: interview.token_budget,
+          });
+        }
+        if ("ai_model" in interview) setAiModel(interview.ai_model);
+        if ("guardrail_preset" in interview) setGuardrailPreset(interview.guardrail_preset);
+        if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+      } catch {
+        // non-fatal — proceed without prefill
+      }
+      const alreadyConfirmed = typeof window !== "undefined"
+        && window.localStorage.getItem(nameConfirmedKey(sessionId)) === "1";
+      if (alreadyConfirmed) setNameReady(true);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [sessionId]);
+
+  // WS connect, gated on display-name confirmation.
+  useEffect(() => {
+    if (!token || !nameReady) return;
     let socket: SessionSocket | null = null;
     let active = true;
 
@@ -86,57 +152,37 @@ export default function CandidateSessionPage() {
           setKicked(true);
           socketRef.current?.close();
         }
+      } else if (e.type === "interview_ended") {
+        // Interviewer ended the session. Candidate's IDE closes; they go back to their dashboard.
+        setEnded(true);
+        socketRef.current?.close();
       }
     }
 
-    (async () => {
-      const supabase = createClient();
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
-      const uid = data.session?.user.id ?? null;
-      setMyProfileId(uid);
-      myProfileIdRef.current = uid;
-      if (!token) {
-        setStatus("not signed in");
-        return;
-      }
-      try {
-        const interview = await api.getSession(sessionId);
-        if ("language" in interview) {
-          setLanguage(interview.language);
-          languageRef.current = interview.language;
-        }
-        if ("prompt" in interview) setPrompt(interview.prompt);
-        if ("starting_code" in interview && interview.starting_code) {
-          setCode(interview.starting_code);
-          codeRef.current = interview.starting_code;
-        }
-        if ("token_budget" in interview && interview.token_budget > 0) {
-          setBudget({
-            used: 0,
-            budget: interview.token_budget,
-            remaining: interview.token_budget,
-          });
-        }
-      } catch {
-        // non-fatal
-      }
-      if (!active) return;
-      socket = new SessionSocket(sessionId, token);
-      socketRef.current = socket;
-      socket.connect({
-        onOpen: () => setStatus("connected"),
-        onClose: () => setStatus("disconnected"),
-        onEvent: handleEvent,
-      });
-    })();
+    if (!active) return;
+    socket = new SessionSocket(sessionId, token);
+    socketRef.current = socket;
+    socket.connect({
+      onOpen: () => setStatus("connected"),
+      onClose: () => setStatus("disconnected"),
+      onEvent: handleEvent,
+    });
 
     return () => {
       active = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       socket?.close();
     };
-  }, [sessionId]);
+  }, [sessionId, token, nameReady]);
+
+  async function confirmDisplayName(name: string) {
+    await api.updateMe({ display_name: name });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(nameConfirmedKey(sessionId), "1");
+    }
+    setDefaultName(name);
+    setNameReady(true);
+  }
 
   function onCodeChange(value: string) {
     setCode(value);
@@ -171,6 +217,34 @@ export default function CandidateSessionPage() {
     } finally {
       setRunning(false);
     }
+  }
+
+  if (!nameReady && token) {
+    return (
+      <DisplayNameModal
+        open
+        defaultName={defaultName}
+        onConfirm={confirmDisplayName}
+      />
+    );
+  }
+
+  if (ended) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 className="text-2xl font-bold">Interview ended</h1>
+        <p className="text-sm text-neutral-400">
+          Thanks for your time. The interviewer has wrapped up this session.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/candidate")}
+          className="mx-auto rounded bg-white px-4 py-2 text-sm font-medium text-black"
+        >
+          Go to dashboard
+        </button>
+      </main>
+    );
   }
 
   if (kicked) {
@@ -322,6 +396,11 @@ export default function CandidateSessionPage() {
               <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
                 AI assistant
               </div>
+              <AIInfoHeader
+                model={aiModel}
+                guardrailPreset={guardrailPreset}
+                hallucinationPct={hallucinationPct}
+              />
               <div className="flex-1 overflow-hidden">
                 <ChatBox messages={messages} onSend={onSend} busy={busy} />
               </div>

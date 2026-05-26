@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.base import get_session
 from app.db.models import Profile, Role
+from app.services.names import random_display_name
 
 settings = get_settings()
 _bearer = HTTPBearer(auto_error=True)
@@ -100,10 +101,17 @@ async def get_current_profile(
     token: Annotated[TokenData, Depends(get_token_data)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Profile:
-    """Return the caller's profile, creating it on first authenticated request."""
+    """Return the caller's profile, creating it on first authenticated request.
+
+    New profiles get a randomized display name (e.g. "sillyraccoon") rather than the email, so
+    we never leak the user's email into the participant panel. The user picks a real name
+    later via `PATCH /auth/me`.
+    """
     profile = await session.get(Profile, token.user_id)
     if profile is None:
-        profile = Profile(id=token.user_id, role=token.role_hint, display_name=token.email)
+        profile = Profile(
+            id=token.user_id, role=token.role_hint, display_name=random_display_name()
+        )
         session.add(profile)
         await session.commit()
         await session.refresh(profile)

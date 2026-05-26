@@ -200,6 +200,42 @@ live-tested against Wandbox.
 > Schema migrations applied in order: `0001_initial` → `0002_d2_config` → `0003_rename_room_to_session`
 > → `0004_interview_type_token_budget` → `0005_waiting_room`. **Run `alembic upgrade head`** to apply.
 
+## 7c. Phase 4 — role-aware signup + post-mortem + display names (implemented 2026-05-26)
+
+- [x] `[backend]` Split end-interview into two events: immediate `interview_ended` broadcast
+  (status flip + ended_at) followed by an async `_generate_scorecard_async` background task that
+  emits `scorecard_ready` when the LLM is done. Interviewer no longer waits on the LLM call.
+  See [routers/ws.py](backend/app/routers/ws.py).
+- [x] `[backend]` New endpoints: `GET /sessions/mine` (privacy-stripped candidate log),
+  `PATCH /auth/me` (display name update), `GET /sessions/{id}/transcripts` (interviewer-only,
+  carries `was_hallucinated`). Candidate log schema deliberately omits problem, code, title,
+  language, join code, interviewer identity, scorecard.
+- [x] `[backend]` `services/names.py` — random adjective+animal display name generator. New
+  profiles default to e.g. "sillyraccoon" instead of the email. Users override via the modal.
+- [x] `[frontend]` `/signup` now has a role picker (interviewer vs candidate) and honors
+  `?role=` + `?next=` query params from invite-link redirects. `/login` branches by role:
+  interviewer → `/dashboard`, candidate → `/candidate`. Middleware gates `/candidate` to
+  candidates and `/dashboard` to interviewers; the other lands back on their own dashboard.
+- [x] `[frontend]` `/candidate` — bare log: interview type label + date/time + status badge.
+  No problem, code, chat, or scorecard exposed.
+- [x] `[frontend]` `DisplayNameModal` — gates entry to both `/interview/[id]` (candidate) and
+  `/dashboard/[id]` (interviewer). Prefills the random fallback name; saving calls `PATCH
+  /auth/me` and marks the session "confirmed" in localStorage so refresh doesn't re-prompt.
+  WS connect is gated on confirmation so the participant broadcast carries the final name.
+- [x] `[frontend]` Participants popover — interviewer's sidebar participants panel was
+  removed. A 👤 icon + count + waiting badge sits in the header (left of "End interview");
+  clicking opens a dropdown with the same admit/kick controls.
+  See [components/Dashboard/ParticipantsPopover.tsx](frontend/components/Dashboard/ParticipantsPopover.tsx).
+- [x] `[frontend]` End-interview UX — candidate WS handler switches to an "Interview ended"
+  screen with a "Go to dashboard" button (routes to `/candidate`). Interviewer page flips to
+  summary mode in place: header reads "Session summary", end-interview + participants
+  controls hidden, chat panel shows persisted transcripts (via the new endpoint), terminal
+  shows last run, scorecard panel shows a loading state until `scorecard_ready` arrives.
+  Clicking a past session from `/dashboard` enters the same summary view directly.
+
+> No DB migration in Phase 4 — all changes use existing columns/tables. Deferred to **Phase 4b**:
+> live cursor sync (CodeSignal-style cursor labels + selection mirroring in the editor).
+
 ## 8. Status
 
 **Current: Deliverable 1 implemented AND verified live.** The full loop was exercised against a real
@@ -207,6 +243,15 @@ Supabase project + Anthropic key: ES256 login (JWKS verify) → interviewer crea
 candidate joins → live WS code/chat sync → Claude reply → hallucination flag (interviewer-only)
 → interview end → LLM scorecard. The only remaining D1 item is deployment. AI is cost-optimized:
 Haiku model, capped `max_tokens`, capped chat history. Run locally via `SETUP.md`.
+
+**Phase 4 (2026-05-26):** role-aware signup (interviewer/candidate picker), candidate dashboard
+as a privacy-stripped log (date/time/type only), random display name fallback ("sillyraccoon")
++ a per-session display-name modal that gates entry on both sides, participants moved from a
+sidebar panel to a header popover (👤 icon + count + waiting badge), and the end-interview
+flow split into immediate `interview_ended` (both sides leave the IDE instantly) + async
+`scorecard_ready` (LLM generates in the background, summary view shows loading state). Past
+sessions on `/dashboard` open the same summary view. No DB migration — all changes use
+existing columns. Deferred to Phase 4b: live cursor sync (CodeSignal-style).
 
 **Phase 1–3 redesign (2026-05-26):** all three phases shipped in a single sitting. Phase 1 renamed
 recruiter→interviewer + room→session everywhere (migration 0003) and turned `/dashboard` into a
@@ -227,6 +272,7 @@ waiting-room flow with interviewer admit/kick (migration 0005).
 | Phase 1 redesign (renames + dashboard restructure) | ✅ Code-complete |
 | Phase 2 (wizard + interview types + token budget) | ✅ Code-complete (statically verified) |
 | Phase 3 (CodeSignal layout + waiting room + terminal + kick) | ✅ Code-complete (statically verified) |
+| Phase 4 (role-aware signup + candidate dashboard + post-mortem + display names) | ✅ Code-complete (statically verified) |
 | Live E2E of the redesign | ⬜ Pending: apply migrations 0003–0005 + run with Docker up |
 | Deployment (Supabase + Render) | ⬜ Not started |
 

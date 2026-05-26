@@ -33,7 +33,7 @@ export default function ChatBox({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-3 overflow-y-auto p-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && !busy && (
           <p className="text-sm text-neutral-500">No messages yet.</p>
         )}
         {messages.map((m, i) => (
@@ -52,6 +52,18 @@ export default function ChatBox({
             )}
           </div>
         ))}
+        {busy && (
+          <div className="text-left">
+            <div className="inline-flex items-center gap-2 rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-300">
+              <span className="flex gap-1">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400 [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400 [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400" />
+              </span>
+              <span className="text-neutral-400">Claude is thinking…</span>
+            </div>
+          </div>
+        )}
       </div>
       {!readOnly && (
         <form onSubmit={submit} className="flex gap-2 border-t border-neutral-800 p-2">

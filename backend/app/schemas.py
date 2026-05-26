@@ -88,6 +88,40 @@ class ProfileOut(BaseModel):
     created_at: datetime
 
 
+class ProfileUpdate(BaseModel):
+    """Patch payload for `PATCH /auth/me`. Only the display name is editable so far."""
+
+    display_name: str = Field(min_length=1, max_length=255)
+
+
+class CandidateSessionLog(BaseModel):
+    """Privacy-stripped session row for the candidate dashboard.
+
+    The candidate dashboard is a log; it intentionally omits the problem statement, code,
+    transcripts, scorecard, language, join code, and interviewer identity. Only the kind of
+    interview, its status, and when it happened.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    interview_type: str
+    status: SessionStatus
+    created_at: datetime
+    ended_at: datetime | None
+
+
+class TranscriptOut(BaseModel):
+    """One chat turn — interviewer-only (includes the `was_hallucinated` flag)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    role: str
+    content: str
+    was_hallucinated: bool
+    created_at: datetime
+
+
 class SessionCreate(BaseModel):
     title: str = Field(default="Untitled interview", max_length=255)
     language: str = Field(default="python", max_length=40)
@@ -124,10 +158,15 @@ class SessionOut(BaseModel):
     status: SessionStatus
     created_at: datetime
     ended_at: datetime | None
+    # Model the AI assistant is using right now (server-wide env). Surfaced in the chat header
+    # so both interviewer + candidate know which Claude is talking to them.
+    ai_model: str = ""
 
 
 class SessionCandidateView(BaseModel):
-    """Limited session view for candidates — hides guardrails + hallucination settings."""
+    """Limited session view for candidates. Guardrail preset + hallucination % are shown so
+    the candidate isn't blind-sided by AI behavior (the *exact* guardrail text and
+    interviewer-only custom override remain hidden)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -139,6 +178,9 @@ class SessionCandidateView(BaseModel):
     starting_code: str
     token_budget: int
     status: SessionStatus
+    guardrail_preset: str = ""
+    hallucination_pct: int = 0
+    ai_model: str = ""
 
 
 class SessionSummary(BaseModel):

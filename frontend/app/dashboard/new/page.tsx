@@ -36,18 +36,14 @@ export default function NewSessionPage() {
             {origin}/join/{created.join_code}
           </code>
           <div className="flex gap-3">
-            <Link
+            <a
               href={`/dashboard/${created.id}`}
+              target="_blank"
+              rel="noopener"
               className="rounded bg-white px-4 py-2 text-sm font-medium text-black"
             >
-              Open live view
-            </Link>
-            <Link
-              href="/dashboard"
-              className="rounded border border-neutral-700 px-4 py-2 text-sm"
-            >
-              Back to dashboard
-            </Link>
+              Open live view ↗
+            </a>
           </div>
         </div>
       ) : (

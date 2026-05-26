@@ -42,6 +42,7 @@ from app.redis_client import get_redis, publish, session_channel, subscribe
 from app.security import decode_token
 from app.services import agent, hallucinator, pushback, scorecard, telemetry
 from app.services.llm import build_guardrail_system
+from app.services.names import random_display_name
 
 router = APIRouter(tags=["ws"])
 
@@ -151,13 +152,36 @@ async def _pump_redis_to_ws(channel: str, websocket: WebSocket, is_interviewer: 
 
 
 async def _end_interview(session_id: str, channel: str) -> None:
+    """Two-phase end-interview: immediate broadcast so both sides leave the IDE without waiting
+    on the scorecard LLM call; the scorecard is generated in the background and emits its own
+    `scorecard_ready` event when finished."""
+    ended_at: datetime | None = None
     async with SessionLocal() as db:
         interview = await db.get(InterviewSession, uuid.UUID(session_id))
         if interview is not None and interview.status != SessionStatus.ended:
             interview.status = SessionStatus.ended
             interview.ended_at = datetime.now(UTC)
             await db.commit()
-    card = await scorecard.generate_scorecard(session_id=session_id)
+            ended_at = interview.ended_at
+        elif interview is not None:
+            ended_at = interview.ended_at
+    await publish(
+        channel,
+        {
+            "type": "interview_ended",
+            "payload": {"ended_at": ended_at.isoformat() if ended_at else None},
+        },
+    )
+    telemetry.fire(_generate_scorecard_async(session_id, channel))
+
+
+async def _generate_scorecard_async(session_id: str, channel: str) -> None:
+    try:
+        card = await scorecard.generate_scorecard(session_id=session_id)
+    except Exception:
+        # Scorecard generation failed; the summary view will keep showing its loading state.
+        # Future: emit a `scorecard_failed` event so the UI can surface an error.
+        return
     await publish(channel, {"type": "scorecard_ready", "payload": {"scorecard_id": card["id"]}})
 
 
@@ -178,7 +202,9 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
         profile = await db.get(Profile, token_data.user_id)
         if profile is None:
             profile = Profile(
-                id=token_data.user_id, role=token_data.role_hint, display_name=token_data.email
+                id=token_data.user_id,
+                role=token_data.role_hint,
+                display_name=random_display_name(),
             )
             db.add(profile)
             await db.commit()

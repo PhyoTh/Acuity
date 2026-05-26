@@ -135,6 +135,7 @@ export interface SessionConfig {
   status: SessionStatus;
   created_at: string;
   ended_at: string | null;
+  ai_model: string;
 }
 
 export interface SessionCandidateView {
@@ -146,6 +147,9 @@ export interface SessionCandidateView {
   starting_code: string;
   token_budget: number;
   status: SessionStatus;
+  guardrail_preset: string;
+  hallucination_pct: number;
+  ai_model: string;
 }
 
 export interface SessionSummary {
@@ -155,6 +159,23 @@ export interface SessionSummary {
   language: string;
   interview_type: string;
   status: SessionStatus;
+  created_at: string;
+}
+
+// Privacy-stripped session row for the candidate dashboard. Mirrors backend
+// `CandidateSessionLog` — deliberately no problem, code, scorecard, language, etc.
+export interface CandidateSessionLog {
+  id: string;
+  interview_type: string;
+  status: SessionStatus;
+  created_at: string;
+  ended_at: string | null;
+}
+
+export interface TranscriptTurn {
+  role: "user" | "assistant";
+  content: string;
+  was_hallucinated: boolean;
   created_at: string;
 }
 

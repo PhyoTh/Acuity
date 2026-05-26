@@ -2,29 +2,25 @@
 
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
+import AIInfoHeader from "@/components/Chat/AIInfoHeader";
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
-import ScorecardPanel from "@/components/Dashboard/Scorecard";
+import ParticipantsPopover, { type Participant } from "@/components/Dashboard/ParticipantsPopover";
+import SummaryView from "@/components/Dashboard/SummaryView";
+import DisplayNameModal from "@/components/DisplayNameModal";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { Scorecard } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
+function nameConfirmedKey(sessionId: string): string {
+  return `devlens:display-name-confirmed:${sessionId}`;
+}
+
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
-interface Snapshot {
-  code: string;
-  at: string;
-}
-
-interface Participant {
-  profile_id: string;
-  role: string;
-  admitted: boolean;
-  display_name: string;
-}
 
 // Interviewer's hidden live view: same CodeSignal-style resizable layout as the candidate, but
 // the editor is read-only and the right column hosts the participants panel (admit/kick),
@@ -40,15 +36,115 @@ export default function InterviewerSessionPage() {
   const [pushback, setPushback] = useState<string[]>([]);
   const [pasteCount, setPasteCount] = useState(0);
   const [lastRun, setLastRun] = useState<{ passed: number; total: number } | null>(null);
-  const [replay, setReplay] = useState<{ snapshots: Snapshot[]; index: number } | null>(null);
   const [budget, setBudget] = useState<{ used: number; budget: number; remaining: number } | null>(
     null,
   );
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [nameReady, setNameReady] = useState(false);
+  const [defaultName, setDefaultName] = useState("");
+  const [ended, setEnded] = useState(false);
+  const [transcripts, setTranscripts] = useState<ChatMessage[] | null>(null);
+  const [scorecardLoading, setScorecardLoading] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiModel, setAiModel] = useState<string>("");
+  const [guardrailPreset, setGuardrailPreset] = useState<string>("");
+  const [hallucinationPct, setHallucinationPct] = useState<number>(0);
+  const [title, setTitle] = useState<string>("");
+  const [createdAt, setCreatedAt] = useState<string>("");
+  const [endedAt, setEndedAt] = useState<string | null>(null);
   const socketRef = useRef<SessionSocket | null>(null);
 
+  const loadSummary = useCallback(async () => {
+    // Fetch the post-mortem data: chat history, final code snapshot, last run, scorecard (may 404).
+    try {
+      const [turns, events] = await Promise.all([
+        api.getTranscripts(sessionId),
+        api.getEvents(sessionId),
+      ]);
+      setTranscripts(
+        turns.map((t) => ({
+          role: t.role,
+          content: t.content,
+          was_hallucinated: t.was_hallucinated,
+        })),
+      );
+      const codeChanges = events.filter(
+        (e) => e.type === "code_change" && typeof e.payload.code === "string",
+      );
+      if (codeChanges.length > 0) {
+        setCode(codeChanges[codeChanges.length - 1].payload.code as string);
+      }
+      const runs = events.filter((e) => e.type === "code_run");
+      const lastRunEvent = runs[runs.length - 1];
+      if (lastRunEvent) {
+        setLastRun(lastRunEvent.payload as { passed: number; total: number });
+      }
+    } catch {
+      // non-fatal
+    }
+    setScorecardLoading(true);
+    try {
+      const card = await api.getScorecard(sessionId);
+      setScorecard(card);
+    } catch {
+      // 404 — not ready yet; the `scorecard_ready` WS event will refetch when it's done.
+    } finally {
+      setScorecardLoading(false);
+    }
+  }, [sessionId]);
+
+  // Bootstrap: load profile + session config, decide whether to show the display-name modal,
+  // and detect a session that's already ended (clicked from /dashboard list).
   useEffect(() => {
+    let active = true;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token ?? null;
+      const uid = data.session?.user.id ?? null;
+      setToken(accessToken);
+      setMyProfileId(uid);
+      if (!accessToken) {
+        setStatus("not signed in");
+        return;
+      }
+      try {
+        const [me, interview] = await Promise.all([api.me(), api.getSession(sessionId)]);
+        if (!active) return;
+        setDefaultName(me.display_name ?? "");
+        if ("language" in interview) setLanguage(interview.language);
+        if ("starting_code" in interview && interview.starting_code) setCode(interview.starting_code);
+        if ("prompt" in interview) setPrompt(interview.prompt);
+        if ("title" in interview) setTitle(interview.title);
+        if ("created_at" in interview) setCreatedAt(interview.created_at);
+        if ("ended_at" in interview) setEndedAt(interview.ended_at);
+        if ("ai_model" in interview) setAiModel(interview.ai_model);
+        if ("guardrail_preset" in interview) setGuardrailPreset(interview.guardrail_preset);
+        if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+        if ("status" in interview && interview.status === "ended") {
+          setEnded(true);
+          // Summary mode is read-only — no live broadcast, no participant panel — so a display
+          // name isn't needed. Skip the modal entirely; data loads directly.
+          setNameReady(true);
+          void loadSummary();
+        }
+      } catch {
+        // non-fatal
+      }
+      const alreadyConfirmed = typeof window !== "undefined"
+        && window.localStorage.getItem(nameConfirmedKey(sessionId)) === "1";
+      if (alreadyConfirmed) setNameReady(true);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [sessionId, loadSummary]);
+
+  // WS connect, gated on display-name confirmation.
+  useEffect(() => {
+    if (!token || !nameReady) return;
     let socket: SessionSocket | null = null;
     let active = true;
 
@@ -60,12 +156,14 @@ export default function InterviewerSessionPage() {
       } else if (e.type === "chat_message") {
         const p = e.payload as { content: string };
         setMessages((m) => [...m, { role: "user", content: p.content }]);
+        setAiBusy(true);
       } else if (e.type === "ai_response") {
         const p = e.payload as { content: string; was_hallucinated?: boolean };
         setMessages((m) => [
           ...m,
           { role: "assistant", content: p.content, was_hallucinated: p.was_hallucinated },
         ]);
+        setAiBusy(false);
       } else if (e.type === "code_run") {
         setLastRun(e.payload as { passed: number; total: number });
       } else if (e.type === "paste_flag") {
@@ -77,43 +175,40 @@ export default function InterviewerSessionPage() {
         setBudget({ used: p.used, budget: p.budget, remaining: p.remaining });
       } else if (e.type === "participants") {
         setParticipants((e.payload as { participants: Participant[] }).participants);
+      } else if (e.type === "interview_ended") {
+        // Backend split: this fires immediately when status flips to ended (before the
+        // scorecard LLM is done). Switch to summary mode now; scorecard fills in later.
+        setEnded(true);
+        void loadSummary();
       } else if (e.type === "scorecard_ready") {
+        setScorecardLoading(false);
         api.getScorecard(sessionId).then(setScorecard).catch(() => undefined);
       }
     }
 
-    (async () => {
-      const supabase = createClient();
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
-      setMyProfileId(data.session?.user.id ?? null);
-      if (!token) {
-        setStatus("not signed in");
-        return;
-      }
-      try {
-        const interview = await api.getSession(sessionId);
-        if ("language" in interview) setLanguage(interview.language);
-        if ("starting_code" in interview && interview.starting_code) setCode(interview.starting_code);
-        if ("prompt" in interview) setPrompt(interview.prompt);
-      } catch {
-        // non-fatal
-      }
-      if (!active) return;
-      socket = new SessionSocket(sessionId, token);
-      socketRef.current = socket;
-      socket.connect({
-        onOpen: () => setStatus("live"),
-        onClose: () => setStatus("disconnected"),
-        onEvent: handleEvent,
-      });
-    })();
+    if (!active) return;
+    socket = new SessionSocket(sessionId, token);
+    socketRef.current = socket;
+    socket.connect({
+      onOpen: () => setStatus("live"),
+      onClose: () => setStatus("disconnected"),
+      onEvent: handleEvent,
+    });
 
     return () => {
       active = false;
       socket?.close();
     };
-  }, [sessionId]);
+  }, [sessionId, token, nameReady, loadSummary]);
+
+  async function confirmDisplayName(name: string) {
+    await api.updateMe({ display_name: name });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(nameConfirmedKey(sessionId), "1");
+    }
+    setDefaultName(name);
+    setNameReady(true);
+  }
 
   function endInterview() {
     socketRef.current?.send("interview_end", {});
@@ -128,21 +223,39 @@ export default function InterviewerSessionPage() {
     socketRef.current?.send("kick", { profile_id: profileId });
   }
 
-  async function loadReplay() {
-    const events = await api.getEvents(sessionId);
-    const snapshots: Snapshot[] = events
-      .filter((e) => e.type === "code_change" && typeof e.payload.code === "string")
-      .map((e) => ({ code: e.payload.code as string, at: e.created_at }));
-    if (snapshots.length > 0) setReplay({ snapshots, index: snapshots.length - 1 });
+  if (!nameReady && token) {
+    return (
+      <DisplayNameModal
+        open
+        defaultName={defaultName}
+        onConfirm={confirmDisplayName}
+      />
+    );
   }
 
-  const editorValue = replay ? (replay.snapshots[replay.index]?.code ?? "") : code;
-  const waitingCandidates = participants.filter((p) => p.role === "candidate" && !p.admitted);
+  if (ended) {
+    return (
+      <SummaryView
+        title={title}
+        createdAt={createdAt}
+        endedAt={endedAt}
+        prompt={prompt}
+        code={code}
+        language={language}
+        transcripts={transcripts ?? messages}
+        lastRun={lastRun}
+        scorecard={scorecard}
+        scorecardLoading={scorecardLoading}
+      />
+    );
+  }
 
   return (
     <main className="flex h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2">
-        <h1 className="text-sm font-semibold">Interviewer view · {status}</h1>
+        <h1 className="text-sm font-semibold">
+          {ended ? "Session summary" : `Interviewer view · ${status}`}
+        </h1>
         {budget && (
           <span className="text-xs text-neutral-400">
             AI tokens: {budget.used.toLocaleString()}/{budget.budget.toLocaleString()}
@@ -158,29 +271,13 @@ export default function InterviewerSessionPage() {
             ⚠ {pasteCount} large paste(s)
           </span>
         )}
-        {waitingCandidates.length > 0 && (
-          <span className="text-xs font-semibold text-amber-300">
-            {waitingCandidates.length} waiting to be admitted
-          </span>
-        )}
-        <div className="ml-auto flex gap-2">
-          {replay ? (
-            <button
-              type="button"
-              onClick={() => setReplay(null)}
-              className="rounded border border-neutral-700 px-3 py-1 text-sm"
-            >
-              Back to live
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={loadReplay}
-              className="rounded border border-neutral-700 px-3 py-1 text-sm"
-            >
-              Replay
-            </button>
-          )}
+        <div className="ml-auto flex items-center gap-2">
+          <ParticipantsPopover
+            participants={participants}
+            myProfileId={myProfileId}
+            onAdmit={admit}
+            onKick={kick}
+          />
           <button
             type="button"
             onClick={endInterview}
@@ -191,106 +288,24 @@ export default function InterviewerSessionPage() {
         </div>
       </header>
 
-      {replay && (
-        <div className="flex items-center gap-3 border-b border-neutral-800 px-4 py-1.5 text-xs">
-          <span className="text-neutral-400">Replay</span>
-          <input
-            type="range"
-            min={0}
-            max={replay.snapshots.length - 1}
-            value={replay.index}
-            onChange={(e) => setReplay({ ...replay, index: Number(e.target.value) })}
-            className="flex-1"
-          />
-          <span className="text-neutral-500">
-            {replay.index + 1}/{replay.snapshots.length} ·{" "}
-            {new Date(replay.snapshots[replay.index]?.at ?? "").toLocaleTimeString()}
-          </span>
-        </div>
-      )}
-
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal" autoSaveId="interview-interviewer-h">
           <Panel defaultSize={22} minSize={5} collapsible collapsedSize={3}>
-            <PanelGroup direction="vertical" autoSaveId="interview-interviewer-left">
-              <Panel defaultSize={55} minSize={15}>
-                <div className="flex h-full flex-col border-r border-neutral-800 bg-neutral-950">
-                  <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                    Problem
-                  </div>
-                  <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-3 text-sm text-neutral-200">
-                    {prompt || (
-                      <span className="text-neutral-500">(no problem statement)</span>
-                    )}
-                  </div>
-                </div>
-              </Panel>
-              <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
-              <Panel defaultSize={45} minSize={10}>
-                <div className="flex h-full flex-col border-r border-t border-neutral-800 bg-neutral-950">
-                  <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                    Participants ({participants.length})
-                  </div>
-                  <ul className="flex-1 space-y-1 overflow-y-auto p-2 text-xs">
-                    {participants.map((p) => {
-                      const isMe = p.profile_id === myProfileId;
-                      const isWaiting = !p.admitted && p.role === "candidate";
-                      return (
-                        <li
-                          key={p.profile_id}
-                          className="rounded border border-neutral-800 p-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="truncate font-medium text-neutral-200">
-                                {p.display_name}
-                                {isMe && (
-                                  <span className="ml-1 text-neutral-500">(you)</span>
-                                )}
-                              </div>
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                {p.role}
-                                {isWaiting ? " · waiting" : p.admitted ? " · admitted" : ""}
-                              </div>
-                            </div>
-                            {!isMe && (
-                              <div className="flex shrink-0 gap-1">
-                                {isWaiting && (
-                                  <button
-                                    type="button"
-                                    onClick={() => admit(p.profile_id)}
-                                    className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white"
-                                  >
-                                    Admit
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => kick(p.profile_id)}
-                                  className="rounded border border-red-700 px-2 py-0.5 text-[10px] text-red-300"
-                                >
-                                  Kick
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                    {participants.length === 0 && (
-                      <li className="text-neutral-500">No one in this session yet.</li>
-                    )}
-                  </ul>
-                </div>
-              </Panel>
-            </PanelGroup>
+            <div className="flex h-full flex-col border-r border-neutral-800 bg-neutral-950">
+              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                Problem
+              </div>
+              <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-3 text-sm text-neutral-200">
+                {prompt || <span className="text-neutral-500">(no problem statement)</span>}
+              </div>
+            </div>
           </Panel>
           <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
           <Panel defaultSize={53} minSize={30}>
             <PanelGroup direction="vertical" autoSaveId="interview-interviewer-v">
               <Panel defaultSize={70} minSize={20}>
                 <div className="h-full">
-                  <CodeEditor value={editorValue} language={language} readOnly />
+                  <CodeEditor value={code} language={language} readOnly />
                 </div>
               </Panel>
               <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
@@ -317,10 +332,17 @@ export default function InterviewerSessionPage() {
           <Panel defaultSize={25} minSize={5} collapsible collapsedSize={3}>
             <div className="flex h-full flex-col border-l border-neutral-800">
               <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                AI chat (mirror)
+                AI chat {ended ? "(history)" : "(mirror)"}
               </div>
+              {!ended && (
+                <AIInfoHeader
+                  model={aiModel}
+                  guardrailPreset={guardrailPreset}
+                  hallucinationPct={hallucinationPct}
+                />
+              )}
               <div className="flex-1 overflow-hidden">
-                <ChatBox messages={messages} readOnly />
+                <ChatBox messages={transcripts ?? messages} readOnly busy={!ended && aiBusy} />
               </div>
               {pushback.length > 0 && (
                 <div className="border-t border-neutral-800 p-3">
@@ -332,11 +354,6 @@ export default function InterviewerSessionPage() {
                       <li key={i}>{q}</li>
                     ))}
                   </ul>
-                </div>
-              )}
-              {scorecard && (
-                <div className="border-t border-neutral-800 p-3">
-                  <ScorecardPanel scorecard={scorecard} />
                 </div>
               )}
             </div>

@@ -5,6 +5,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 
 // Refreshes the Supabase session cookie on every request and enforces role-based routing:
 //   - /dashboard*  -> interviewers only
+//   - /candidate*  -> candidates only
 //   - /interview*  -> any authenticated user
 //   - /join/*      -> public (candidate invite entry point)
 export async function middleware(request: NextRequest) {
@@ -36,12 +37,18 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const role = (user?.user_metadata?.role as string | undefined) ?? null;
 
-  const needsAuth = path.startsWith("/dashboard") || path.startsWith("/interview");
+  const needsAuth =
+    path.startsWith("/dashboard") ||
+    path.startsWith("/interview") ||
+    path.startsWith("/candidate");
   if (needsAuth && !user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   if (path.startsWith("/dashboard") && role !== "interviewer") {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/candidate", request.url));
+  }
+  if (path.startsWith("/candidate") && role !== "candidate") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return response;
