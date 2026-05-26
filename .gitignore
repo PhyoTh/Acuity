@@ -1,0 +1,37 @@
+# ---- Node / Next.js (frontend) ----
+node_modules/
+.pnpm-store/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- Python (backend) ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ---- Environment / secrets (keep *.example) ----
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# ---- Editor / OS ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Misc ----
+*.log
+coverage/
+.coverage

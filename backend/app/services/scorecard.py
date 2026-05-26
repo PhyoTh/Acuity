@@ -1,0 +1,112 @@
+"""Scorecard generator.
+
+Inputs : the complete `transcripts` for a room (with hallucination flags) when the session ends.
+Output : a structured JSON grade across 4 dimensions — prompt quality, caught AI errors,
+         code correctness, approach & independence — plus a summary. Persisted to `scorecards`.
+
+Uses Claude structured output (via langchain `with_structured_output`) for a validated result.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any, cast
+
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from app.db.base import SessionLocal
+from app.db.models import Event, Scorecard, Transcript
+from app.services.llm import get_chat_model
+
+_SYSTEM = (
+    "You are evaluating how well a candidate used an AI assistant during a technical interview. "
+    "The assistant sometimes injects subtle flaws on purpose; turns marked [HALLUCINATED] "
+    "contained a deliberate flaw. Reward candidates who noticed/corrected flawed output and who "
+    "prompted strategically. Score each dimension 0-10."
+)
+
+
+class _ScorecardResult(BaseModel):
+    prompt_quality: int = Field(
+        ge=0, le=10, description="How strategic/clear the candidate's prompts were"
+    )
+    caught_ai_errors: int = Field(
+        ge=0, le=10, description="Did they detect/debug injected flaws vs blindly copy"
+    )
+    code_correctness: int = Field(
+        ge=0, le=10, description="Quality/correctness of the resulting solution"
+    )
+    approach_independence: int = Field(
+        ge=0, le=10, description="Problem decomposition and independent reasoning"
+    )
+    summary: str = Field(description="2-4 sentence recruiter-facing summary")
+
+
+def _transcript_block(rows: list[Transcript]) -> str:
+    lines: list[str] = []
+    for t in rows:
+        speaker = "Candidate" if t.role.value == "user" else "AI"
+        tag = " [HALLUCINATED]" if t.was_hallucinated else ""
+        lines.append(f"{speaker}{tag}: {t.content}")
+    return "\n".join(lines) if lines else "(no chat activity)"
+
+
+async def generate_scorecard(*, room_id: str) -> dict[str, Any]:
+    """Build and persist the final scorecard for a room; returns it as a dict."""
+    rid = uuid.UUID(room_id)
+    async with SessionLocal() as session:
+        existing = await session.scalar(select(Scorecard).where(Scorecard.room_id == rid))
+        if existing is not None:
+            return _to_dict(existing)
+
+        transcripts = list(
+            await session.scalars(
+                select(Transcript).where(Transcript.room_id == rid).order_by(Transcript.created_at)
+            )
+        )
+        code_changes = list(
+            await session.scalars(
+                select(Event)
+                .where(Event.room_id == rid, Event.type == "code_change")
+                .order_by(Event.created_at.desc())
+            )
+        )
+        latest_code = code_changes[0].payload.get("code", "") if code_changes else ""
+
+        model = get_chat_model(max_tokens=1024, temperature=0).with_structured_output(
+            _ScorecardResult
+        )
+        prompt = (
+            f"Interview transcript:\n{_transcript_block(transcripts)}\n\n"
+            f"Candidate's final code:\n{latest_code or '(empty)'}"
+        )
+        result = cast(
+            _ScorecardResult,
+            await model.ainvoke(
+                [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": prompt}]
+            ),
+        )
+
+        scores = {
+            "prompt_quality": result.prompt_quality,
+            "caught_ai_errors": result.caught_ai_errors,
+            "code_correctness": result.code_correctness,
+            "approach_independence": result.approach_independence,
+        }
+        overall = round(sum(scores.values()) / len(scores), 2)
+        card = Scorecard(room_id=rid, scores=scores, summary=result.summary, overall=overall)
+        session.add(card)
+        await session.commit()
+        await session.refresh(card)
+        return _to_dict(card)
+
+
+def _to_dict(card: Scorecard) -> dict[str, Any]:
+    return {
+        "id": str(card.id),
+        "room_id": str(card.room_id),
+        "scores": card.scores,
+        "summary": card.summary,
+        "overall": card.overall,
+    }
