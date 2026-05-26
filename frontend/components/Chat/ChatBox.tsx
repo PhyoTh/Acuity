@@ -8,7 +8,7 @@ export interface ChatMessage {
   was_hallucinated?: boolean;
 }
 
-// Chat transcript + composer. Used live by the candidate and read-only on the recruiter dashboard.
+// Chat transcript + composer. Used live by the candidate and read-only on the interviewer dashboard.
 export default function ChatBox({
   messages,
   onSend,

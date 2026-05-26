@@ -7,7 +7,7 @@ const LABELS: Record<string, string> = {
   approach_independence: "Approach & independence",
 };
 
-// Post-interview scorecard panel (recruiter dashboard).
+// Post-interview scorecard panel (interviewer dashboard).
 export default function ScorecardPanel({ scorecard }: { scorecard: Scorecard }) {
   return (
     <div className="space-y-3 rounded border border-neutral-800 p-4">

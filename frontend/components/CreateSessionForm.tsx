@@ -5,16 +5,20 @@ import { type FormEvent, useState } from "react";
 import { api } from "@/lib/api";
 import {
   GUARDRAIL_PRESETS,
-  type RoomConfig,
-  type RoomCreateInput,
+  type SessionConfig,
+  type SessionCreateInput,
   type TestCaseInput,
 } from "@/lib/types";
 
 const LANGUAGES = ["python", "javascript", "typescript", "java", "cpp", "go"];
 
-// Recruiter form to create an interview room (problem + AI config + D2 settings).
-export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomConfig) => void }) {
-  const [form, setForm] = useState<RoomCreateInput>({
+// Interviewer form to create an interview session (problem + AI config + D2 settings).
+export default function CreateSessionForm({
+  onCreated,
+}: {
+  onCreated: (session: SessionConfig) => void;
+}) {
+  const [form, setForm] = useState<SessionCreateInput>({
     title: "Untitled interview",
     language: "python",
     prompt: "",
@@ -30,7 +34,7 @@ export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomCo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  function update<K extends keyof RoomCreateInput>(key: K, value: RoomCreateInput[K]) {
+  function update<K extends keyof SessionCreateInput>(key: K, value: SessionCreateInput[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
@@ -55,9 +59,9 @@ export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomCo
     setBusy(true);
     setError(null);
     try {
-      onCreated(await api.createRoom(form));
+      onCreated(await api.createSession(form));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create room");
+      setError(err instanceof Error ? err.message : "Failed to create session");
     } finally {
       setBusy(false);
     }
@@ -67,7 +71,7 @@ export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomCo
 
   return (
     <form onSubmit={submit} className="space-y-3 rounded border border-neutral-800 p-4">
-      <h3 className="text-lg font-semibold">New interview room</h3>
+      <h3 className="text-lg font-semibold">New interview session</h3>
       <input
         className={field}
         value={form.title}
@@ -129,7 +133,9 @@ export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomCo
           </button>
         </div>
         {form.test_cases.length === 0 && (
-          <p className="text-xs text-neutral-500">No test cases — candidate Run just shows output.</p>
+          <p className="text-xs text-neutral-500">
+            No test cases — candidate Run just shows output.
+          </p>
         )}
         {form.test_cases.map((t, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
@@ -214,7 +220,7 @@ export default function CreateRoomForm({ onCreated }: { onCreated: (room: RoomCo
         className="rounded bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
         disabled={busy}
       >
-        {busy ? "Creating..." : "Create room"}
+        {busy ? "Creating..." : "Create session"}
       </button>
     </form>
   );

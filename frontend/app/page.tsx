@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-// Landing page placeholder. Real routing (role-based redirect to
-// /interview or /dashboard) is a Deliverable 1 task — see plan.md §6.
+// Public landing page. Authenticated interviewers are routed onward by the middleware
+// (Log in → /dashboard); candidates arrive via their invite link (/join/<code>).
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-6">
@@ -9,7 +9,7 @@ export default function Home() {
         <h1 className="text-4xl font-bold">DevLens</h1>
         <p className="mt-2 text-neutral-400">
           Live technical interviews with an embedded AI assistant and a hidden
-          recruiter telemetry + scorecard dashboard.
+          interviewer telemetry + scorecard dashboard.
         </p>
       </div>
       <div className="flex gap-4 text-sm">
@@ -21,7 +21,7 @@ export default function Home() {
         </Link>
       </div>
       <p className="text-xs text-neutral-600">
-        Scaffold only — no features wired up yet. See plan.md for the roadmap.
+        Interviewers create sessions and share a join link; candidates join through the link.
       </p>
     </main>
   );

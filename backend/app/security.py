@@ -4,7 +4,7 @@ Supabase user session tokens are signed with asymmetric keys (ES256/RS256) and v
 project's JWKS endpoint; the legacy HS256 shared secret is also accepted (used by
 scripts/mint_test_token.py). Tokens carry audience `authenticated` and the user id in `sub`. On the
 first authenticated request we bootstrap a `profiles` row using the role in `user_metadata.role`
-(set at signup: recruiter signup -> recruiter; candidate invite -> candidate).
+(set at signup: interviewer signup -> interviewer; candidate invite -> candidate).
 """
 
 from __future__ import annotations

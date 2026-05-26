@@ -9,7 +9,7 @@ import ScorecardPanel from "@/components/Dashboard/Scorecard";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { Scorecard } from "@/lib/types";
-import { RoomSocket, type RoomEvent } from "@/lib/ws";
+import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
@@ -18,10 +18,10 @@ interface Snapshot {
   at: string;
 }
 
-// Recruiter's hidden live view: read-only mirror of code + chat (with hallucination flag),
+// Interviewer's hidden live view: read-only mirror of code + chat (with hallucination flag),
 // cheat/run indicators, push-back questions, replay timeline, and the post-interview scorecard.
-export default function RecruiterRoomPage() {
-  const { roomId } = useParams<{ roomId: string }>();
+export default function InterviewerSessionPage() {
+  const { sessionId } = useParams<{ sessionId: string }>();
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -31,13 +31,13 @@ export default function RecruiterRoomPage() {
   const [pasteCount, setPasteCount] = useState(0);
   const [lastRun, setLastRun] = useState<{ passed: number; total: number } | null>(null);
   const [replay, setReplay] = useState<{ snapshots: Snapshot[]; index: number } | null>(null);
-  const socketRef = useRef<RoomSocket | null>(null);
+  const socketRef = useRef<SessionSocket | null>(null);
 
   useEffect(() => {
-    let socket: RoomSocket | null = null;
+    let socket: SessionSocket | null = null;
     let active = true;
 
-    function handleEvent(e: RoomEvent) {
+    function handleEvent(e: SessionEvent) {
       if (e.type === "code_change") {
         const p = e.payload as { code?: string; language?: string };
         if (typeof p.code === "string") setCode(p.code);
@@ -58,7 +58,7 @@ export default function RecruiterRoomPage() {
       } else if (e.type === "pushback") {
         setPushback((e.payload as { questions: string[] }).questions);
       } else if (e.type === "scorecard_ready") {
-        api.getScorecard(roomId).then(setScorecard).catch(() => undefined);
+        api.getScorecard(sessionId).then(setScorecard).catch(() => undefined);
       }
     }
 
@@ -71,14 +71,14 @@ export default function RecruiterRoomPage() {
         return;
       }
       try {
-        const room = await api.getRoom(roomId);
-        if ("language" in room) setLanguage(room.language);
-        if ("starting_code" in room && room.starting_code) setCode(room.starting_code);
+        const interview = await api.getSession(sessionId);
+        if ("language" in interview) setLanguage(interview.language);
+        if ("starting_code" in interview && interview.starting_code) setCode(interview.starting_code);
       } catch {
         // non-fatal
       }
       if (!active) return;
-      socket = new RoomSocket(roomId, token);
+      socket = new SessionSocket(sessionId, token);
       socketRef.current = socket;
       socket.connect({
         onOpen: () => setStatus("live"),
@@ -91,14 +91,14 @@ export default function RecruiterRoomPage() {
       active = false;
       socket?.close();
     };
-  }, [roomId]);
+  }, [sessionId]);
 
   function endInterview() {
     socketRef.current?.send("interview_end", {});
   }
 
   async function loadReplay() {
-    const events = await api.getEvents(roomId);
+    const events = await api.getEvents(sessionId);
     const snapshots: Snapshot[] = events
       .filter((e) => e.type === "code_change" && typeof e.payload.code === "string")
       .map((e) => ({ code: e.payload.code as string, at: e.created_at }));
@@ -110,7 +110,7 @@ export default function RecruiterRoomPage() {
   return (
     <main className="flex h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2">
-        <h1 className="text-sm font-semibold">Recruiter view · {status}</h1>
+        <h1 className="text-sm font-semibold">Interviewer view · {status}</h1>
         {lastRun && lastRun.total > 0 && (
           <span className="text-xs text-neutral-300">
             last run {lastRun.passed}/{lastRun.total}

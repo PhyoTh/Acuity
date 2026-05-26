@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import Role, RoomStatus
+from app.db.models import Role, SessionStatus
 
 GUARDRAIL_PRESETS = ("hints_only", "no_full_solutions", "explain_dont_write", "open")
 
@@ -28,7 +28,7 @@ class ProfileOut(BaseModel):
     created_at: datetime
 
 
-class RoomCreate(BaseModel):
+class SessionCreate(BaseModel):
     title: str = Field(default="Untitled interview", max_length=255)
     language: str = Field(default="python", max_length=40)
     prompt: str = ""
@@ -42,8 +42,8 @@ class RoomCreate(BaseModel):
     enable_pushback: bool = False
 
 
-class RoomOut(BaseModel):
-    """Full room view (recruiter/creator only — includes AI config)."""
+class SessionOut(BaseModel):
+    """Full session view (interviewer/creator only — includes AI config)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -61,13 +61,13 @@ class RoomOut(BaseModel):
     query_quota: int
     ai_max_tokens: int | None
     enable_pushback: bool
-    status: RoomStatus
+    status: SessionStatus
     created_at: datetime
     ended_at: datetime | None
 
 
-class RoomCandidateView(BaseModel):
-    """Limited room view for candidates — hides guardrails + hallucination settings."""
+class SessionCandidateView(BaseModel):
+    """Limited session view for candidates — hides guardrails + hallucination settings."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -77,17 +77,17 @@ class RoomCandidateView(BaseModel):
     prompt: str
     starting_code: str
     query_quota: int
-    status: RoomStatus
+    status: SessionStatus
 
 
-class RoomSummary(BaseModel):
+class SessionSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     join_code: str
     title: str
     language: str
-    status: RoomStatus
+    status: SessionStatus
     created_at: datetime
 
 
@@ -96,7 +96,7 @@ class JoinRequest(BaseModel):
 
 
 class JoinResult(BaseModel):
-    room_id: uuid.UUID
+    session_id: uuid.UUID
     role: Role
 
 
@@ -104,7 +104,7 @@ class ScorecardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    room_id: uuid.UUID
+    session_id: uuid.UUID
     scores: dict[str, float]
     summary: str
     overall: float | None

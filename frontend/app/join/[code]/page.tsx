@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 
 // Candidate invite entry point. If already signed in, joins immediately; otherwise lets the
-// candidate sign up / sign in (role = candidate) and then joins the room.
+// candidate sign up / sign in (role = candidate) and then joins the session.
 export default function JoinPage() {
   const router = useRouter();
   const params = useParams<{ code: string }>();
@@ -23,10 +23,10 @@ export default function JoinPage() {
     setBusy(true);
     setError(null);
     try {
-      const { room_id } = await api.joinRoom(code);
-      router.push(`/interview/${room_id}`);
+      const { session_id } = await api.joinSession(code);
+      router.push(`/interview/${session_id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not join room");
+      setError(err instanceof Error ? err.message : "Could not join session");
       setBusy(false);
     }
   }, [code, router]);
@@ -81,7 +81,7 @@ export default function JoinPage() {
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-6">
       <div>
         <h1 className="text-2xl font-bold">Join interview</h1>
-        <p className="mt-1 text-sm text-neutral-500">Room code: {code}</p>
+        <p className="mt-1 text-sm text-neutral-500">Session code: {code}</p>
       </div>
       <form className="space-y-3">
         <input

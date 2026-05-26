@@ -1,7 +1,7 @@
-"""Interview/room router.
+"""Interview/session router.
 
-Recruiter creates a room (problem + AI config) and gets a shareable `join_code`; a candidate joins
-by code (recruiter-invite flow). See plan.md §4 (data model) and §6 (tasks).
+Interviewer creates a session (problem + AI config) and gets a shareable `join_code`; a candidate
+joins by code (invite flow). See plan.md §4 (data model) and §6 (tasks).
 """
 
 from __future__ import annotations
@@ -18,198 +18,206 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import get_session
 from app.db.models import (
     Event,
-    InterviewRoom,
+    InterviewSession,
     Profile,
     Role,
-    RoomParticipant,
-    RoomStatus,
     Scorecard,
+    SessionParticipant,
+    SessionStatus,
 )
-from app.redis_client import publish, room_channel
+from app.redis_client import publish, session_channel
 from app.schemas import (
     GUARDRAIL_PRESETS,
     EventOut,
     JoinRequest,
     JoinResult,
-    RoomCandidateView,
-    RoomCreate,
-    RoomOut,
-    RoomSummary,
     RunRequest,
     RunResult,
     ScorecardOut,
+    SessionCandidateView,
+    SessionCreate,
+    SessionOut,
+    SessionSummary,
     TestResult,
 )
 from app.security import get_current_profile, require_role
 from app.services import executor, telemetry
 
-router = APIRouter(prefix="/rooms", tags=["interview"])
+router = APIRouter(prefix="/sessions", tags=["interview"])
 
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 
-async def _generate_join_code(session: AsyncSession) -> str:
+async def _generate_join_code(db: AsyncSession) -> str:
     for _ in range(10):
         code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
-        clash = await session.scalar(
-            select(InterviewRoom.id).where(InterviewRoom.join_code == code)
+        clash = await db.scalar(
+            select(InterviewSession.id).where(InterviewSession.join_code == code)
         )
         if clash is None:
             return code
     raise HTTPException(status_code=500, detail="Could not allocate a unique join code")
 
 
-@router.post("", response_model=RoomOut, status_code=status.HTTP_201_CREATED)
-async def create_room(
-    body: RoomCreate,
-    recruiter: Annotated[Profile, Depends(require_role(Role.recruiter))],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> InterviewRoom:
+@router.post("", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+async def create_session(
+    body: SessionCreate,
+    interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> InterviewSession:
     if body.guardrail_preset not in GUARDRAIL_PRESETS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"guardrail_preset must be one of {GUARDRAIL_PRESETS}",
         )
-    room = InterviewRoom(
-        join_code=await _generate_join_code(session),
-        created_by=recruiter.id,
+    interview = InterviewSession(
+        join_code=await _generate_join_code(db),
+        created_by=interviewer.id,
         **body.model_dump(),
     )
-    session.add(room)
-    await session.flush()
-    session.add(RoomParticipant(room_id=room.id, profile_id=recruiter.id, role=Role.recruiter))
-    await session.commit()
-    await session.refresh(room)
-    return room
+    db.add(interview)
+    await db.flush()
+    db.add(
+        SessionParticipant(
+            session_id=interview.id, profile_id=interviewer.id, role=Role.interviewer
+        )
+    )
+    await db.commit()
+    await db.refresh(interview)
+    return interview
 
 
-@router.get("", response_model=list[RoomSummary])
-async def list_rooms(
-    recruiter: Annotated[Profile, Depends(require_role(Role.recruiter))],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[InterviewRoom]:
-    rows = await session.scalars(
-        select(InterviewRoom)
-        .where(InterviewRoom.created_by == recruiter.id)
-        .order_by(InterviewRoom.created_at.desc())
+@router.get("", response_model=list[SessionSummary])
+async def list_sessions(
+    interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[InterviewSession]:
+    rows = await db.scalars(
+        select(InterviewSession)
+        .where(InterviewSession.created_by == interviewer.id)
+        .order_by(InterviewSession.created_at.desc())
     )
     return list(rows)
 
 
 @router.post("/join", response_model=JoinResult)
-async def join_room(
+async def join_session(
     body: JoinRequest,
     profile: Annotated[Profile, Depends(get_current_profile)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    db: Annotated[AsyncSession, Depends(get_session)],
 ) -> JoinResult:
-    room = await session.scalar(
-        select(InterviewRoom).where(InterviewRoom.join_code == body.join_code.upper())
+    interview = await db.scalar(
+        select(InterviewSession).where(InterviewSession.join_code == body.join_code.upper())
     )
-    if room is None:
+    if interview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid join code")
-    if room.status == RoomStatus.ended:
+    if interview.status == SessionStatus.ended:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview has ended")
 
-    existing = await session.scalar(
-        select(RoomParticipant).where(
-            RoomParticipant.room_id == room.id,
-            RoomParticipant.profile_id == profile.id,
+    existing = await db.scalar(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == interview.id,
+            SessionParticipant.profile_id == profile.id,
         )
     )
     if existing is None:
-        session.add(RoomParticipant(room_id=room.id, profile_id=profile.id, role=profile.role))
-    if room.status == RoomStatus.pending and profile.role == Role.candidate:
-        room.status = RoomStatus.active
-    await session.commit()
-    return JoinResult(room_id=room.id, role=profile.role)
+        db.add(
+            SessionParticipant(
+                session_id=interview.id, profile_id=profile.id, role=profile.role
+            )
+        )
+    if interview.status == SessionStatus.pending and profile.role == Role.candidate:
+        interview.status = SessionStatus.active
+    await db.commit()
+    return JoinResult(session_id=interview.id, role=profile.role)
 
 
-@router.get("/{room_id}", response_model=None)
-async def get_room(
-    room_id: uuid.UUID,
+@router.get("/{session_id}", response_model=None)
+async def get_session_view(
+    session_id: uuid.UUID,
     profile: Annotated[Profile, Depends(get_current_profile)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> RoomOut | RoomCandidateView:
-    room = await session.get(InterviewRoom, room_id)
-    if room is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
-    participant = await session.scalar(
-        select(RoomParticipant).where(
-            RoomParticipant.room_id == room.id,
-            RoomParticipant.profile_id == profile.id,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionOut | SessionCandidateView:
+    interview = await db.get(InterviewSession, session_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    participant = await db.scalar(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == interview.id,
+            SessionParticipant.profile_id == profile.id,
         )
     )
     if participant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant")
 
-    if profile.role == Role.recruiter and room.created_by == profile.id:
-        return RoomOut.model_validate(room)
-    return RoomCandidateView.model_validate(room)
+    if profile.role == Role.interviewer and interview.created_by == profile.id:
+        return SessionOut.model_validate(interview)
+    return SessionCandidateView.model_validate(interview)
 
 
-@router.get("/{room_id}/scorecard", response_model=ScorecardOut)
+@router.get("/{session_id}/scorecard", response_model=ScorecardOut)
 async def get_scorecard(
-    room_id: uuid.UUID,
+    session_id: uuid.UUID,
     profile: Annotated[Profile, Depends(get_current_profile)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Scorecard:
-    participant = await session.scalar(
-        select(RoomParticipant).where(
-            RoomParticipant.room_id == room_id,
-            RoomParticipant.profile_id == profile.id,
+    participant = await db.scalar(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.profile_id == profile.id,
         )
     )
     if participant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant")
-    card = await session.scalar(select(Scorecard).where(Scorecard.room_id == room_id))
+    card = await db.scalar(select(Scorecard).where(Scorecard.session_id == session_id))
     if card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scorecard not ready")
     return card
 
 
 async def _require_participant(
-    room_id: uuid.UUID, profile: Profile, session: AsyncSession
-) -> InterviewRoom:
-    room = await session.get(InterviewRoom, room_id)
-    if room is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
-    participant = await session.scalar(
-        select(RoomParticipant).where(
-            RoomParticipant.room_id == room_id,
-            RoomParticipant.profile_id == profile.id,
+    session_id: uuid.UUID, profile: Profile, db: AsyncSession
+) -> InterviewSession:
+    interview = await db.get(InterviewSession, session_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    participant = await db.scalar(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.profile_id == profile.id,
         )
     )
     if participant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant")
-    return room
+    return interview
 
 
-@router.post("/{room_id}/run", response_model=RunResult)
-async def run_room_code(
-    room_id: uuid.UUID,
+@router.post("/{session_id}/run", response_model=RunResult)
+async def run_session_code(
+    session_id: uuid.UUID,
     body: RunRequest,
     profile: Annotated[Profile, Depends(get_current_profile)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    db: Annotated[AsyncSession, Depends(get_session)],
 ) -> RunResult:
-    room = await _require_participant(room_id, profile, session)
-    is_recruiter = profile.role == Role.recruiter
-    tests = room.test_cases or []
+    interview = await _require_participant(session_id, profile, db)
+    is_interviewer = profile.role == Role.interviewer
+    tests = interview.test_cases or []
 
     if not tests:
-        out = await executor.run_code(language=room.language, code=body.code)
-        await _log_run(room_id, profile.role.value, 0, 0)
+        out = await executor.run_code(language=interview.language, code=body.code)
+        await _log_run(session_id, profile.role.value, 0, 0)
         return RunResult(passed=0, total=0, results=[], stdout=out["stdout"], stderr=out["stderr"])
 
     results: list[TestResult] = []
     passed = 0
     for i, tc in enumerate(tests):
         out = await executor.run_code(
-            language=room.language, code=body.code, stdin=str(tc.get("stdin", ""))
+            language=interview.language, code=body.code, stdin=str(tc.get("stdin", ""))
         )
         ok = out["stdout"].strip() == str(tc.get("expected", "")).strip()
         passed += int(ok)
         hidden = bool(tc.get("hidden"))
-        show = is_recruiter or not hidden
+        show = is_interviewer or not hidden
         results.append(
             TestResult(
                 name=f"Test {i + 1}",
@@ -221,27 +229,27 @@ async def run_room_code(
                 stderr=out["stderr"] if show else None,
             )
         )
-    await _log_run(room_id, profile.role.value, passed, len(tests))
+    await _log_run(session_id, profile.role.value, passed, len(tests))
     return RunResult(passed=passed, total=len(tests), results=results)
 
 
-async def _log_run(room_id: uuid.UUID, actor: str, passed: int, total: int) -> None:
+async def _log_run(session_id: uuid.UUID, actor: str, passed: int, total: int) -> None:
     payload = {"passed": passed, "total": total}
     await telemetry.record_event(
-        room_id=str(room_id), actor=actor, event_type="code_run", payload=payload
+        session_id=str(session_id), actor=actor, event_type="code_run", payload=payload
     )
-    await publish(room_channel(str(room_id)), {"type": "code_run", "payload": payload})
+    await publish(session_channel(str(session_id)), {"type": "code_run", "payload": payload})
 
 
-@router.get("/{room_id}/events", response_model=list[EventOut])
-async def list_room_events(
-    room_id: uuid.UUID,
-    recruiter: Annotated[Profile, Depends(require_role(Role.recruiter))],
-    session: Annotated[AsyncSession, Depends(get_session)],
+@router.get("/{session_id}/events", response_model=list[EventOut])
+async def list_session_events(
+    session_id: uuid.UUID,
+    interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
+    db: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[Event]:
-    """Chronological event log for the recruiter's replay timeline."""
-    await _require_participant(room_id, recruiter, session)
-    rows = await session.scalars(
-        select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
+    """Chronological event log for the interviewer's replay timeline."""
+    await _require_participant(session_id, interviewer, db)
+    rows = await db.scalars(
+        select(Event).where(Event.session_id == session_id).order_by(Event.created_at)
     )
     return list(rows)

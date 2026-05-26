@@ -1,6 +1,6 @@
 """Scorecard generator.
 
-Inputs : the complete `transcripts` for a room (with hallucination flags) when the session ends.
+Inputs : the complete `transcripts` for a session (with hallucination flags) when it ends.
 Output : a structured JSON grade across 4 dimensions — prompt quality, caught AI errors,
          code correctness, approach & independence — plus a summary. Persisted to `scorecards`.
 
@@ -40,7 +40,7 @@ class _ScorecardResult(BaseModel):
     approach_independence: int = Field(
         ge=0, le=10, description="Problem decomposition and independent reasoning"
     )
-    summary: str = Field(description="2-4 sentence recruiter-facing summary")
+    summary: str = Field(description="2-4 sentence interviewer-facing summary")
 
 
 def _transcript_block(rows: list[Transcript]) -> str:
@@ -52,23 +52,25 @@ def _transcript_block(rows: list[Transcript]) -> str:
     return "\n".join(lines) if lines else "(no chat activity)"
 
 
-async def generate_scorecard(*, room_id: str) -> dict[str, Any]:
-    """Build and persist the final scorecard for a room; returns it as a dict."""
-    rid = uuid.UUID(room_id)
-    async with SessionLocal() as session:
-        existing = await session.scalar(select(Scorecard).where(Scorecard.room_id == rid))
+async def generate_scorecard(*, session_id: str) -> dict[str, Any]:
+    """Build and persist the final scorecard for a session; returns it as a dict."""
+    sid = uuid.UUID(session_id)
+    async with SessionLocal() as db:
+        existing = await db.scalar(select(Scorecard).where(Scorecard.session_id == sid))
         if existing is not None:
             return _to_dict(existing)
 
         transcripts = list(
-            await session.scalars(
-                select(Transcript).where(Transcript.room_id == rid).order_by(Transcript.created_at)
+            await db.scalars(
+                select(Transcript)
+                .where(Transcript.session_id == sid)
+                .order_by(Transcript.created_at)
             )
         )
         code_changes = list(
-            await session.scalars(
+            await db.scalars(
                 select(Event)
-                .where(Event.room_id == rid, Event.type == "code_change")
+                .where(Event.session_id == sid, Event.type == "code_change")
                 .order_by(Event.created_at.desc())
             )
         )
@@ -95,17 +97,17 @@ async def generate_scorecard(*, room_id: str) -> dict[str, Any]:
             "approach_independence": result.approach_independence,
         }
         overall = round(sum(scores.values()) / len(scores), 2)
-        card = Scorecard(room_id=rid, scores=scores, summary=result.summary, overall=overall)
-        session.add(card)
-        await session.commit()
-        await session.refresh(card)
+        card = Scorecard(session_id=sid, scores=scores, summary=result.summary, overall=overall)
+        db.add(card)
+        await db.commit()
+        await db.refresh(card)
         return _to_dict(card)
 
 
 def _to_dict(card: Scorecard) -> dict[str, Any]:
     return {
         "id": str(card.id),
-        "room_id": str(card.room_id),
+        "session_id": str(card.session_id),
         "scores": card.scores,
         "summary": card.summary,
         "overall": card.overall,

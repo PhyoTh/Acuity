@@ -55,6 +55,10 @@ def build_guardrail_system(preset: str, custom: str) -> str:
     return "\n\n".join(parts)
 
 
+# Note: keeping `GUARDRAIL_PRESETS` aligned with schemas.GUARDRAIL_PRESETS is enforced by tests
+# at the call site (services/agent.py uses `build_guardrail_system` directly).
+
+
 def cached_system_message(text: str) -> SystemMessage:
     """A SystemMessage whose content is marked for Anthropic prompt caching."""
     return SystemMessage(

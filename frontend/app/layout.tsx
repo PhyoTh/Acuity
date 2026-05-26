@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DevLens",
-  description: "Live technical interviews with an AI assistant + recruiter telemetry.",
+  description: "Live technical interviews with an AI assistant + interviewer telemetry.",
 };
 
 export default function RootLayout({

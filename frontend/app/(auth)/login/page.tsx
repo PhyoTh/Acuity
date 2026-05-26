@@ -27,7 +27,7 @@ export default function LoginPage() {
     }
     try {
       const me = await api.me();
-      router.push(me.role === "recruiter" ? "/dashboard" : "/");
+      router.push(me.role === "interviewer" ? "/dashboard" : "/");
     } catch {
       router.push("/");
     }
@@ -61,7 +61,7 @@ export default function LoginPage() {
         </button>
       </form>
       <p className="text-sm text-neutral-500">
-        Recruiter? <Link href="/signup" className="underline">Create an account</Link>. Candidates
+        Interviewer? <Link href="/signup" className="underline">Create an account</Link>. Candidates
         join via their invite link.
       </p>
     </main>

@@ -1,75 +1,124 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import CreateRoomForm from "@/components/CreateRoomForm";
 import { api } from "@/lib/api";
-import type { RoomConfig, RoomSummary } from "@/lib/types";
+import type { SessionStatus, SessionSummary } from "@/lib/types";
 
+const STATUS_OPTIONS: ("all" | SessionStatus)[] = ["all", "pending", "active", "ended"];
+
+// Interviewer dashboard home: a searchable, filterable list of the interviewer's sessions.
+// The create form lives on its own route (`/dashboard/new`) reached via the "+ New session" button.
 export default function DashboardHome() {
-  const [rooms, setRooms] = useState<RoomSummary[]>([]);
-  const [created, setCreated] = useState<RoomConfig | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [language, setLanguage] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | SessionStatus>("all");
 
   useEffect(() => {
     api
-      .listRooms()
-      .then(setRooms)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load rooms"));
+      .listSessions()
+      .then((rows) => {
+        setSessions(rows);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load sessions"))
+      .finally(() => setLoading(false));
   }, []);
 
-  function onCreated(room: RoomConfig) {
-    setCreated(room);
-    setRooms((prev) => [
-      {
-        id: room.id,
-        join_code: room.join_code,
-        title: room.title,
-        language: room.language,
-        status: room.status,
-        created_at: room.created_at,
-      },
-      ...prev,
-    ]);
-  }
+  const languages = useMemo(
+    () => Array.from(new Set(sessions.map((s) => s.language))).sort(),
+    [sessions],
+  );
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return sessions.filter((s) => {
+      if (statusFilter !== "all" && s.status !== statusFilter) return false;
+      if (language !== "all" && s.language !== language) return false;
+      if (q && !s.title.toLowerCase().includes(q) && !s.join_code.toLowerCase().includes(q))
+        return false;
+      return true;
+    });
+  }, [sessions, query, language, statusFilter]);
+
+  const field = "rounded bg-neutral-900 px-3 py-2 text-sm outline-none";
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Recruiter dashboard</h1>
-      <CreateRoomForm onCreated={onCreated} />
-      {created && (
-        <div className="rounded border border-green-800 bg-green-950/40 p-4 text-sm">
-          Room created. Share this candidate invite link:
-          <code className="mt-1 block break-all text-green-300">
-            {origin}/join/{created.join_code}
-          </code>
+    <main className="mx-auto max-w-4xl space-y-6 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Interviewer dashboard</h1>
+        <Link
+          href="/dashboard/new"
+          className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+        >
+          + New session
+        </Link>
+      </div>
+
+      <section className="space-y-3 rounded border border-neutral-800 p-4">
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+          <input
+            className={field}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by title or join code…"
+          />
+          <select
+            className={field}
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            <option value="all">All languages</option>
+            {languages.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <select
+            className={field}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "all" | SessionStatus)}
+          >
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s === "all" ? "All statuses" : s}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Your rooms</h2>
+
         {error && <p className="text-sm text-red-400">{error}</p>}
+        {loading && <p className="text-sm text-neutral-500">Loading…</p>}
+
         <ul className="space-y-2">
-          {rooms.map((r) => (
+          {filtered.map((s) => (
             <li
-              key={r.id}
-              className="flex items-center justify-between rounded border border-neutral-800 p-3 text-sm"
+              key={s.id}
+              className="flex items-center justify-between rounded border border-neutral-800 p-3 text-sm hover:border-neutral-700"
             >
-              <div>
-                <Link href={`/dashboard/${r.id}`} className="font-medium underline">
-                  {r.title}
+              <div className="min-w-0">
+                <Link href={`/dashboard/${s.id}`} className="font-medium underline">
+                  {s.title}
                 </Link>
-                <span className="ml-2 text-neutral-500">
-                  {r.language} · {r.status}
-                </span>
+                <div className="text-xs text-neutral-500">
+                  {s.language} · {s.status} ·{" "}
+                  {new Date(s.created_at).toLocaleString()}
+                </div>
               </div>
-              <code className="text-neutral-400">{r.join_code}</code>
+              <code className="text-xs text-neutral-400">{s.join_code}</code>
             </li>
           ))}
-          {rooms.length === 0 && !error && (
-            <p className="text-sm text-neutral-500">No rooms yet — create one above.</p>
+          {!loading && filtered.length === 0 && !error && (
+            <p className="text-sm text-neutral-500">
+              {sessions.length === 0
+                ? "No sessions yet — click + New session to create one."
+                : "No sessions match the current filters."}
+            </p>
           )}
         </ul>
       </section>

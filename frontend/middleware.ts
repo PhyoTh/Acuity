@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
 // Refreshes the Supabase session cookie on every request and enforces role-based routing:
-//   - /dashboard*  -> recruiters only
+//   - /dashboard*  -> interviewers only
 //   - /interview*  -> any authenticated user
 //   - /join/*      -> public (candidate invite entry point)
 export async function middleware(request: NextRequest) {
@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
   if (needsAuth && !user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (path.startsWith("/dashboard") && role !== "recruiter") {
+  if (path.startsWith("/dashboard") && role !== "interviewer") {
     return NextResponse.redirect(new URL("/", request.url));
   }
 

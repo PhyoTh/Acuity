@@ -6,9 +6,9 @@ import { type FormEvent, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 
-// Recruiter sign-up. The role is stored in Supabase user_metadata and read back by the
+// Interviewer sign-up. The role is stored in Supabase user_metadata and read back by the
 // backend on first authenticated request (see app/security.py). Candidates do NOT sign up
-// here — they arrive through a room invite link (/join/<code>).
+// here — they arrive through a session invite link (/join/<code>).
 export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -25,7 +25,7 @@ export default function SignupPage() {
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { role: "recruiter" } },
+      options: { data: { role: "interviewer" } },
     });
     if (signUpError) {
       setError(signUpError.message);
@@ -42,7 +42,7 @@ export default function SignupPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-6">
-      <h1 className="text-2xl font-bold">Recruiter sign up</h1>
+      <h1 className="text-2xl font-bold">Interviewer sign up</h1>
       <form onSubmit={onSubmit} className="space-y-3">
         <input
           className="w-full rounded bg-neutral-900 px-3 py-2 text-sm outline-none"

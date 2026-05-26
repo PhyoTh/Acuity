@@ -1,8 +1,8 @@
 """Hallucination injector.
 
-Inputs : the agent's (correct) answer + the room's hallucination probability (0-100).
+Inputs : the agent's (correct) answer + the session's hallucination probability (0-100).
 Output : with probability p, a subtly corrupted version (one plausible flaw); otherwise the
-         original answer unchanged. Returns a flag so the recruiter dashboard can mark the turn.
+         original answer unchanged. Returns a flag so the interviewer dashboard can mark the turn.
 Effect : forces the candidate to read and debug the AI's output rather than copy it blindly.
 
 Implementation (locked, plan.md §3): a second Claude pass that introduces a SUBTLE flaw.

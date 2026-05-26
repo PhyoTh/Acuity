@@ -2,5 +2,6 @@
 
 Monaco editor wrapper for the candidate IDE.
 
-**TODO (Deliverable 1):** wrap `@monaco-editor/react`, emit debounced `code_change` events over
-`lib/ws.ts`, and expose the current code/language to the chat box for AI context. See plan.md §6.
+Wraps `@monaco-editor/react`, emits debounced `code_change` events over `lib/ws.ts`, reports paste
+lengths for cheat detection, and exposes the current code/language to the chat box for AI context.
+See plan.md §6.

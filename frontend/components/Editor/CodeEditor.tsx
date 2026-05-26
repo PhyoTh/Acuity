@@ -8,7 +8,7 @@ interface PasteCapableEditor {
   getModel(): { getValueInRange(range: unknown): string } | null;
 }
 
-// Monaco wrapper for the candidate IDE and the recruiter's read-only mirror.
+// Monaco wrapper for the candidate IDE and the interviewer's read-only mirror.
 // `onPaste` reports the length of pasted text (used for copy-paste cheat detection).
 export default function CodeEditor({
   value,

@@ -1,7 +1,7 @@
-"""Real-time push-back question generator (recruiter-only, opt-in per room).
+"""Real-time push-back question generator (interviewer-only, opt-in per session).
 
 Given the candidate's current code + recent chat, suggests short probing questions the interviewer
-could ask to test genuine understanding. Opt-in (room.enable_pushback) to control LLM cost.
+could ask to test genuine understanding. Opt-in (session.enable_pushback) to control LLM cost.
 """
 
 from __future__ import annotations

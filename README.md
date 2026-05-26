@@ -1,14 +1,14 @@
 # DevLens
 
 An interactive, **live technical-interview** platform. A candidate solves a coding problem in a
-Monaco IDE with an embedded **AI assistant**, while a recruiter silently watches a **real-time
+Monaco IDE with an embedded **AI assistant**, while an interviewer silently watches a **real-time
 telemetry + evaluation dashboard**.
 
-The defining twist is a **Hallucination Injector**: the AI's correct output is, with a
-recruiter-configured probability, subtly rewritten to contain plausible flaws — so the interview
+The defining twist is a **Hallucination Injector**: the AI's correct output is, with an
+interviewer-configured probability, subtly rewritten to contain plausible flaws — so the interview
 measures whether candidates *critically evaluate* AI rather than blindly copy it.
 
-> **Status:** Deliverable 1 is code-complete (auth, interview rooms, live WebSocket sync, AI
+> **Status:** Deliverable 1 is code-complete (auth, interview sessions, live WebSocket sync, AI
 > assistant, hallucination injector, and LLM scorecard) and statically verified. To run it you need
 > a free Supabase project + an Anthropic key — see **[SETUP.md](SETUP.md)** for a step-by-step guide.
 > See [plan.md](plan.md) for the roadmap/status and [CLAUDE.md](CLAUDE.md) for architecture +
@@ -41,6 +41,7 @@ docker compose up -d
 cd backend
 cp .env.example .env            # then fill in ANTHROPIC_API_KEY + SUPABASE_*
 uv sync
+uv run alembic upgrade head     # apply migrations
 uv run python -m uvicorn app.main:app --reload    # http://localhost:8000  (GET /health)
 
 # 3. Frontend (new terminal)

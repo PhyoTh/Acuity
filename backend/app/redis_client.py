@@ -1,7 +1,7 @@
 """Async Redis client + pub/sub helpers for the real-time sync gateway.
 
-Channel convention (plan.md §5): `room:{id}`. The WS gateway publishes every room event here so
-that all connected sockets for that room (candidate IDE + recruiter dashboard) receive it.
+Channel convention (plan.md §5): `session:{id}`. The WS gateway publishes every session event here
+so that all connected sockets for that session (candidate IDE + interviewer dashboard) receive it.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ async def close_redis() -> None:
         _client = None
 
 
-def room_channel(room_id: str) -> str:
-    return f"room:{room_id}"
+def session_channel(session_id: str) -> str:
+    return f"session:{session_id}"
 
 
 async def publish(channel: str, message: dict[str, Any]) -> None:

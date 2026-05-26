@@ -36,10 +36,10 @@ class Base(DeclarativeBase):
 
 class Role(enum.StrEnum):
     candidate = "candidate"
-    recruiter = "recruiter"
+    interviewer = "interviewer"
 
 
-class RoomStatus(enum.StrEnum):
+class SessionStatus(enum.StrEnum):
     pending = "pending"
     active = "active"
     ended = "ended"
@@ -67,10 +67,10 @@ class Profile(Base):
     )
 
 
-class InterviewRoom(Base):
-    """One interview session and its recruiter-defined configuration."""
+class InterviewSession(Base):
+    """One interview session and its interviewer-defined configuration."""
 
-    __tablename__ = "interview_rooms"
+    __tablename__ = "interview_sessions"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     join_code: Mapped[str] = mapped_column(String(12), unique=True, index=True, nullable=False)
@@ -102,28 +102,28 @@ class InterviewRoom(Base):
         Boolean, nullable=False, server_default=text("false"), default=False
     )
 
-    status: Mapped[RoomStatus] = mapped_column(
-        Enum(RoomStatus, name="room_status"), nullable=False, default=RoomStatus.pending
+    status: Mapped[SessionStatus] = mapped_column(
+        Enum(SessionStatus, name="session_status"), nullable=False, default=SessionStatus.pending
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    participants: Mapped[list[RoomParticipant]] = relationship(
-        back_populates="room", cascade="all, delete-orphan"
+    participants: Mapped[list[SessionParticipant]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
     )
 
 
-class RoomParticipant(Base):
-    """Who is in a room and as what role (recruiter = creator; candidate = joined via code)."""
+class SessionParticipant(Base):
+    """Who is in a session and as what role (interviewer = creator; candidate = joined by code)."""
 
-    __tablename__ = "room_participants"
-    __table_args__ = (UniqueConstraint("room_id", "profile_id", name="uq_room_profile"),)
+    __tablename__ = "session_participants"
+    __table_args__ = (UniqueConstraint("session_id", "profile_id", name="uq_session_profile"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    room_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_rooms.id", ondelete="CASCADE"), nullable=False, index=True
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     profile_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
@@ -133,7 +133,7 @@ class RoomParticipant(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    room: Mapped[InterviewRoom] = relationship(back_populates="participants")
+    session: Mapped[InterviewSession] = relationship(back_populates="participants")
 
 
 class Event(Base):
@@ -142,10 +142,10 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    room_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_rooms.id", ondelete="CASCADE"), nullable=False, index=True
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    actor: Mapped[str] = mapped_column(String(40), nullable=False)  # candidate|recruiter|system
+    actor: Mapped[str] = mapped_column(String(40), nullable=False)  # candidate|interviewer|system
     type: Mapped[str] = mapped_column(String(40), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
@@ -159,8 +159,8 @@ class Transcript(Base):
     __tablename__ = "transcripts"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    room_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_rooms.id", ondelete="CASCADE"), nullable=False, index=True
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     role: Mapped[TranscriptRole] = mapped_column(
         Enum(TranscriptRole, name="transcript_role"), nullable=False
@@ -174,13 +174,13 @@ class Transcript(Base):
 
 
 class Scorecard(Base):
-    """Final LLM evaluation for a room (one per room)."""
+    """Final LLM evaluation for a session (one per session)."""
 
     __tablename__ = "scorecards"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    room_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_rooms.id", ondelete="CASCADE"), unique=True, nullable=False
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), unique=True, nullable=False
     )
     # scores: {prompt_quality, caught_ai_errors, code_correctness, approach_independence} -> 0..10
     scores: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

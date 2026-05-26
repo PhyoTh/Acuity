@@ -1,8 +1,8 @@
 """Agentic chat engine (LangGraph + Claude).
 
-Inputs : candidate chat query, current Monaco code state + language, room guardrail system prompt,
-         and recent chat history.
-Output : an LLM-generated reply that obeys the recruiter's guardrails.
+Inputs : candidate chat query, current Monaco code state + language, session guardrail system
+         prompt, and recent chat history.
+Output : an LLM-generated reply that obeys the interviewer's guardrails.
 
 The graph is intentionally minimal for Deliverable 1 — a single model node — but uses LangGraph so
 it can grow (tools, retrieval, push-back questions) without restructuring. History is capped to
@@ -62,8 +62,8 @@ async def generate_reply(
 ) -> str:
     """Return the assistant's reply for a candidate query.
 
-    Uses the LangGraph graph by default; when a per-room `max_tokens` cap is set, calls a one-off
-    model with that cap (honoring the room's token-limit config).
+    Uses the LangGraph graph by default; when a per-session `max_tokens` cap is set, calls a
+    one-off model with that cap (honoring the session's token-limit config).
     """
     messages: list[AnyMessage] = [cached_system_message(system_prompt)]
     for role, content in history[-_HISTORY_LIMIT:]:

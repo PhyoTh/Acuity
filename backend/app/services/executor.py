@@ -1,7 +1,7 @@
 """Code execution sandbox via the public Wandbox API (free, no auth, no local infra).
 
 Runs candidate code (optionally with stdin) in an isolated sandbox and returns stdout/stderr/exit.
-Used by the `/rooms/{id}/run` endpoint to check submissions against recruiter-defined test cases.
+Used by `/sessions/{id}/run` to check submissions against interviewer-defined test cases.
 
 NOTE: the public Piston API (the proposal's first choice) went whitelist-only on 2026-02-15, so we
 use Wandbox. To self-host instead, swap this module to a local Piston/Judge0 instance.

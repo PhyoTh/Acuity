@@ -1,7 +1,7 @@
 // Shared types mirroring the backend schemas (app/schemas.py).
 
-export type Role = "candidate" | "recruiter";
-export type RoomStatus = "pending" | "active" | "ended";
+export type Role = "candidate" | "interviewer";
+export type SessionStatus = "pending" | "active" | "ended";
 
 export const GUARDRAIL_PRESETS = [
   "hints_only",
@@ -49,7 +49,7 @@ export interface Profile {
   created_at: string;
 }
 
-export interface RoomConfig {
+export interface SessionConfig {
   id: string;
   join_code: string;
   created_by: string;
@@ -64,40 +64,40 @@ export interface RoomConfig {
   query_quota: number;
   ai_max_tokens: number | null;
   enable_pushback: boolean;
-  status: RoomStatus;
+  status: SessionStatus;
   created_at: string;
   ended_at: string | null;
 }
 
-export interface RoomCandidateView {
+export interface SessionCandidateView {
   id: string;
   title: string;
   language: string;
   prompt: string;
   starting_code: string;
   query_quota: number;
-  status: RoomStatus;
+  status: SessionStatus;
 }
 
-export interface RoomSummary {
+export interface SessionSummary {
   id: string;
   join_code: string;
   title: string;
   language: string;
-  status: RoomStatus;
+  status: SessionStatus;
   created_at: string;
 }
 
 export interface Scorecard {
   id: string;
-  room_id: string;
+  session_id: string;
   scores: Record<string, number>;
   summary: string;
   overall: number | null;
   created_at: string;
 }
 
-export interface RoomCreateInput {
+export interface SessionCreateInput {
   title: string;
   language: string;
   prompt: string;

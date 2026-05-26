@@ -4,13 +4,13 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   EventRow,
   Profile,
-  RoomCandidateView,
-  RoomConfig,
-  RoomCreateInput,
-  RoomSummary,
   Role,
   RunResult,
   Scorecard,
+  SessionCandidateView,
+  SessionConfig,
+  SessionCreateInput,
+  SessionSummary,
 } from "@/lib/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL!;
@@ -39,17 +39,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => request<Profile>("/auth/me"),
-  createRoom: (body: RoomCreateInput) =>
-    request<RoomConfig>("/rooms", { method: "POST", body: JSON.stringify(body) }),
-  listRooms: () => request<RoomSummary[]>("/rooms"),
-  joinRoom: (joinCode: string) =>
-    request<{ room_id: string; role: Role }>("/rooms/join", {
+  createSession: (body: SessionCreateInput) =>
+    request<SessionConfig>("/sessions", { method: "POST", body: JSON.stringify(body) }),
+  listSessions: () => request<SessionSummary[]>("/sessions"),
+  joinSession: (joinCode: string) =>
+    request<{ session_id: string; role: Role }>("/sessions/join", {
       method: "POST",
       body: JSON.stringify({ join_code: joinCode }),
     }),
-  getRoom: (id: string) => request<RoomConfig | RoomCandidateView>(`/rooms/${id}`),
-  getScorecard: (id: string) => request<Scorecard>(`/rooms/${id}/scorecard`),
+  getSession: (id: string) => request<SessionConfig | SessionCandidateView>(`/sessions/${id}`),
+  getScorecard: (id: string) => request<Scorecard>(`/sessions/${id}/scorecard`),
   runCode: (id: string, code: string) =>
-    request<RunResult>(`/rooms/${id}/run`, { method: "POST", body: JSON.stringify({ code }) }),
-  getEvents: (id: string) => request<EventRow[]>(`/rooms/${id}/events`),
+    request<RunResult>(`/sessions/${id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  getEvents: (id: string) => request<EventRow[]>(`/sessions/${id}/events`),
 };

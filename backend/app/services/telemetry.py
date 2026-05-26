@@ -30,31 +30,33 @@ def fire(coro: Coroutine[Any, Any, Any]) -> None:
 
 
 async def record_event(
-    *, room_id: str, actor: str, event_type: str, payload: dict[str, Any]
+    *, session_id: str, actor: str, event_type: str, payload: dict[str, Any]
 ) -> None:
-    async with SessionLocal() as session:
-        session.add(
-            Event(room_id=uuid.UUID(room_id), actor=actor, type=event_type, payload=payload)
+    async with SessionLocal() as db:
+        db.add(
+            Event(
+                session_id=uuid.UUID(session_id), actor=actor, type=event_type, payload=payload
+            )
         )
-        await session.commit()
+        await db.commit()
 
 
 async def record_transcript(
     *,
-    room_id: str,
+    session_id: str,
     role: str,
     content: str,
     was_hallucinated: bool = False,
     tokens: int | None = None,
 ) -> None:
-    async with SessionLocal() as session:
-        session.add(
+    async with SessionLocal() as db:
+        db.add(
             Transcript(
-                room_id=uuid.UUID(room_id),
+                session_id=uuid.UUID(session_id),
                 role=TranscriptRole(role),
                 content=content,
                 was_hallucinated=was_hallucinated,
                 tokens=tokens,
             )
         )
-        await session.commit()
+        await db.commit()

@@ -1,6 +1,6 @@
 # components/Chat
 
-AI chat box for the candidate (and a read-only mirror on the recruiter dashboard).
+AI chat box for the candidate (and a read-only mirror on the interviewer dashboard).
 
-**TODO (Deliverable 1):** render the transcript, send `chat_message`, stream `ai_response`. The
-candidate never sees the `was_hallucinated` flag; the recruiter's mirror does. See plan.md §5–6.
+Renders the transcript, sends `chat_message` over the session WebSocket, streams `ai_response`. The
+candidate never sees the `was_hallucinated` flag; the interviewer's mirror does. See plan.md §5.

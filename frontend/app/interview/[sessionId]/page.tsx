@@ -8,15 +8,15 @@ import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { RunResult } from "@/lib/types";
-import { RoomSocket, type RoomEvent } from "@/lib/ws";
+import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
 const PASTE_THRESHOLD = 40; // chars; larger pastes get flagged
 
 // Candidate IDE: Monaco editor (code_change + paste detection) + AI chat + Run (code execution).
-export default function CandidateRoomPage() {
-  const { roomId } = useParams<{ roomId: string }>();
+export default function CandidateSessionPage() {
+  const { sessionId } = useParams<{ sessionId: string }>();
   const [language, setLanguage] = useState("python");
   const [prompt, setPrompt] = useState("");
   const [code, setCode] = useState("");
@@ -28,16 +28,16 @@ export default function CandidateRoomPage() {
   const [quota, setQuota] = useState<{ remaining: number; quota: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const socketRef = useRef<RoomSocket | null>(null);
+  const socketRef = useRef<SessionSocket | null>(null);
   const codeRef = useRef("");
   const languageRef = useRef("python");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    let socket: RoomSocket | null = null;
+    let socket: SessionSocket | null = null;
     let active = true;
 
-    function handleEvent(e: RoomEvent) {
+    function handleEvent(e: SessionEvent) {
       if (e.type === "ai_response") {
         const p = e.payload as { content: string };
         setMessages((m) => [...m, { role: "assistant", content: p.content }]);
@@ -61,24 +61,24 @@ export default function CandidateRoomPage() {
         return;
       }
       try {
-        const room = await api.getRoom(roomId);
-        if ("language" in room) {
-          setLanguage(room.language);
-          languageRef.current = room.language;
+        const interview = await api.getSession(sessionId);
+        if ("language" in interview) {
+          setLanguage(interview.language);
+          languageRef.current = interview.language;
         }
-        if ("prompt" in room) setPrompt(room.prompt);
-        if ("starting_code" in room && room.starting_code) {
-          setCode(room.starting_code);
-          codeRef.current = room.starting_code;
+        if ("prompt" in interview) setPrompt(interview.prompt);
+        if ("starting_code" in interview && interview.starting_code) {
+          setCode(interview.starting_code);
+          codeRef.current = interview.starting_code;
         }
-        if ("query_quota" in room && room.query_quota > 0) {
-          setQuota({ remaining: room.query_quota, quota: room.query_quota });
+        if ("query_quota" in interview && interview.query_quota > 0) {
+          setQuota({ remaining: interview.query_quota, quota: interview.query_quota });
         }
       } catch {
         // non-fatal
       }
       if (!active) return;
-      socket = new RoomSocket(roomId, token);
+      socket = new SessionSocket(sessionId, token);
       socketRef.current = socket;
       socket.connect({
         onOpen: () => setStatus("connected"),
@@ -92,7 +92,7 @@ export default function CandidateRoomPage() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       socket?.close();
     };
-  }, [roomId]);
+  }, [sessionId]);
 
   function onCodeChange(value: string) {
     setCode(value);
@@ -121,7 +121,7 @@ export default function CandidateRoomPage() {
     setRunning(true);
     setNotice(null);
     try {
-      setRunResult(await api.runCode(roomId, codeRef.current));
+      setRunResult(await api.runCode(sessionId, codeRef.current));
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Run failed");
     } finally {
