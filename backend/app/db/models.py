@@ -121,7 +121,12 @@ class InterviewSession(Base):
 
 
 class SessionParticipant(Base):
-    """Who is in a session and as what role (interviewer = creator; candidate = joined by code)."""
+    """Who is in a session and as what role (interviewer = creator; candidate = joined by code).
+
+    `admitted` gates the candidate's waiting-room experience: they connect over WS in a waiting
+    state, the interviewer reviews the participant list, and clicks Admit (or Kick) to let them
+    into the live interview.
+    """
 
     __tablename__ = "session_participants"
     __table_args__ = (UniqueConstraint("session_id", "profile_id", name="uq_session_profile"),)
@@ -134,6 +139,9 @@ class SessionParticipant(Base):
         ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), nullable=False)
+    admitted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

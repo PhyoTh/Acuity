@@ -77,9 +77,13 @@ async def create_session(
     )
     db.add(interview)
     await db.flush()
+    # The interviewer (creator) is admitted from the start.
     db.add(
         SessionParticipant(
-            session_id=interview.id, profile_id=interviewer.id, role=Role.interviewer
+            session_id=interview.id,
+            profile_id=interviewer.id,
+            role=Role.interviewer,
+            admitted=True,
         )
     )
     await db.commit()
@@ -121,9 +125,14 @@ async def join_session(
         )
     )
     if existing is None:
+        # Candidates start in the waiting room (admitted=False); interviewers are admitted
+        # immediately so they can review the session as soon as they walk in.
         db.add(
             SessionParticipant(
-                session_id=interview.id, profile_id=profile.id, role=profile.role
+                session_id=interview.id,
+                profile_id=profile.id,
+                role=profile.role,
+                admitted=profile.role != Role.candidate,
             )
         )
     if interview.status == SessionStatus.pending and profile.role == Role.candidate:

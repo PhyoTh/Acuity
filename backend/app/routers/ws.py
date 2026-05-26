@@ -3,13 +3,18 @@
 `WS /ws/sessions/{session_id}?token=<supabase_jwt>`:
   - authenticates via the Supabase JWT, verifies the caller is a session participant,
   - bridges the socket to the Redis `session:{id}` channel (fan-out to the other party),
-  - routes inbound events (plan.md §5): code_change / chat_message / interview_end.
+  - routes inbound events (plan.md §5).
 
 On chat_message: budget check -> agent -> hallucinator -> telemetry -> broadcast ai_response,
 then INCRBY the session's Redis token counter with the call's usage and emit a `token_budget`
 state event so both sides can render remaining.
 
 On interview_end (interviewer): mark ended -> scorecard -> broadcast scorecard_ready.
+
+Phase 3 waiting room: candidates start with `admitted=False`. The interviewer's dashboard shows
+a participant list and can `admit` or `kick`. Until admitted, the candidate's `chat_message` /
+`code_change` are dropped server-side; once admitted, the frontend transitions out of the waiting
+screen.
 
 The candidate never receives the `was_hallucinated` flag (stripped per-socket below).
 All work is async; high-frequency writes go through telemetry.fire (non-blocking).
@@ -23,7 +28,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db.base import SessionLocal
 from app.db.models import (
@@ -69,6 +74,50 @@ async def _broadcast_budget(channel: str, session_id: str, budget: int) -> None:
             },
         },
     )
+
+
+async def _is_admitted(session_id: uuid.UUID, profile_id: uuid.UUID) -> bool:
+    """Re-check the candidate's admit state from the DB. Cheap; called per inbound action."""
+    async with SessionLocal() as db:
+        row = await db.scalar(
+            select(SessionParticipant.admitted).where(
+                SessionParticipant.session_id == session_id,
+                SessionParticipant.profile_id == profile_id,
+            )
+        )
+    return bool(row)
+
+
+async def _participants_payload(session_id: uuid.UUID) -> list[dict[str, Any]]:
+    """List participants with names — fed to both sides for the dashboard's participant panel."""
+    async with SessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(
+                    SessionParticipant.profile_id,
+                    SessionParticipant.role,
+                    SessionParticipant.admitted,
+                    Profile.display_name,
+                )
+                .join(Profile, Profile.id == SessionParticipant.profile_id)
+                .where(SessionParticipant.session_id == session_id)
+                .order_by(SessionParticipant.joined_at)
+            )
+        ).all()
+    return [
+        {
+            "profile_id": str(pid),
+            "role": role.value,
+            "admitted": bool(admitted),
+            "display_name": name or "(unnamed)",
+        }
+        for pid, role, admitted, name in rows
+    ]
+
+
+async def _broadcast_participants(channel: str, session_id: uuid.UUID) -> None:
+    payload = await _participants_payload(session_id)
+    await publish(channel, {"type": "participants", "payload": {"participants": payload}})
 
 
 async def _load_history(session_id: uuid.UUID) -> list[tuple[str, str]]:
@@ -171,15 +220,19 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     channel = session_channel(session_id)
     listener = asyncio.create_task(_pump_redis_to_ws(channel, websocket, is_interviewer))
     await publish(channel, {"type": "presence", "payload": {actor: True}})
-    # Replay the current budget state so both sides render immediately on connect.
+    # Initial state pushes: budget snapshot + participant list (so the interviewer's panel and
+    # the candidate's waiting screen both render correctly on connect).
     raw_budget = session_cfg.get("token_budget") or 0
     initial_budget = int(raw_budget) if isinstance(raw_budget, int) else 0
     await _broadcast_budget(channel, session_id, initial_budget)
+    await _broadcast_participants(channel, session_uuid)
 
     try:
         while True:
             msg = await websocket.receive_json()
-            await _handle_client_message(msg, session_id, channel, actor, profile_id, session_cfg)
+            await _handle_client_message(
+                msg, session_id, session_uuid, channel, actor, profile_id, session_cfg
+            )
     except WebSocketDisconnect:
         pass
     finally:
@@ -190,6 +243,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
 async def _handle_client_message(
     msg: dict[str, Any],
     session_id: str,
+    session_uuid: uuid.UUID,
     channel: str,
     actor: str,
     profile_id: str,
@@ -199,6 +253,8 @@ async def _handle_client_message(
     payload = msg.get("payload", {}) or {}
 
     if mtype == "code_change":
+        if actor == "candidate" and not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
+            return
         await publish(channel, {"type": "code_change", "payload": payload})
         telemetry.fire(
             telemetry.record_event(
@@ -209,6 +265,8 @@ async def _handle_client_message(
 
     if mtype == "paste":
         if actor != "candidate":
+            return
+        if not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
             return
         info = {"length": int(payload.get("length", 0) or 0)}
         telemetry.fire(
@@ -221,6 +279,8 @@ async def _handle_client_message(
 
     if mtype == "chat_message":
         if actor != "candidate":
+            return
+        if not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
             return
         content = str(payload.get("content", "")).strip()
         if not content:
@@ -250,7 +310,7 @@ async def _handle_client_message(
         await publish(channel, {"type": "chat_message", "payload": {"content": content}})
         await telemetry.record_transcript(session_id=session_id, role="user", content=content)
 
-        history = await _load_history(uuid.UUID(session_id))
+        history = await _load_history(session_uuid)
         system_prompt = build_guardrail_system(
             session_cfg["guardrail_preset"], session_cfg["guardrail_custom"]
         )
@@ -271,12 +331,9 @@ async def _handle_client_message(
             was_hallucinated=was_hallucinated,
             tokens=used_tokens,
         )
-        # Accumulate into the budget counter BEFORE broadcasting the response so the next state
-        # event reflects the call we just made.
         if budget > 0 and used_tokens > 0:
             r = get_redis()
             await r.incrby(_tokens_key(session_id), used_tokens)
-            # Match the session's lifetime — long enough to cover any reasonable interview.
             await r.expire(_tokens_key(session_id), 86400)
         await publish(
             channel,
@@ -290,6 +347,57 @@ async def _handle_client_message(
         if session_cfg.get("enable_pushback"):
             convo = [*history, ("user", content), ("assistant", final)]
             telemetry.fire(_emit_pushback(session_id, channel, code, convo))
+        return
+
+    if mtype == "admit":
+        if actor != "interviewer":
+            return
+        target_raw = payload.get("profile_id")
+        if not isinstance(target_raw, str):
+            return
+        try:
+            target = uuid.UUID(target_raw)
+        except ValueError:
+            return
+        async with SessionLocal() as db:
+            row = await db.scalar(
+                select(SessionParticipant).where(
+                    SessionParticipant.session_id == session_uuid,
+                    SessionParticipant.profile_id == target,
+                )
+            )
+            if row is None or row.admitted:
+                return
+            row.admitted = True
+            await db.commit()
+        await _broadcast_participants(channel, session_uuid)
+        return
+
+    if mtype == "kick":
+        if actor != "interviewer":
+            return
+        target_raw = payload.get("profile_id")
+        if not isinstance(target_raw, str):
+            return
+        try:
+            target = uuid.UUID(target_raw)
+        except ValueError:
+            return
+        if target == uuid.UUID(profile_id):
+            # Interviewers can't kick themselves.
+            return
+        async with SessionLocal() as db:
+            await db.execute(
+                delete(SessionParticipant).where(
+                    SessionParticipant.session_id == session_uuid,
+                    SessionParticipant.profile_id == target,
+                )
+            )
+            await db.commit()
+        # The targeted socket sees `kicked` with its own profile_id and closes; everyone else
+        # uses the refreshed participant list.
+        await publish(channel, {"type": "kicked", "payload": {"profile_id": str(target)}})
+        await _broadcast_participants(channel, session_uuid)
         return
 
     if mtype == "interview_end":

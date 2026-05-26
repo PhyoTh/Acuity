@@ -11,7 +11,11 @@ export type SessionEventType =
   | "paste_flag" // server -> interviewer: cheat flag
   | "code_run" // server -> session: run summary
   | "token_budget" // server -> session: AI token-budget usage state
-  | "pushback"; // server -> interviewer: suggested questions
+  | "pushback" // server -> interviewer: suggested questions
+  | "participants" // server -> session: current participant list (with admit state)
+  | "admit" // interviewer -> server: admit a waiting candidate
+  | "kick" // interviewer -> server: remove a participant
+  | "kicked"; // server -> session: participant was removed (target self-closes)
 
 export interface SessionEvent<T = Record<string, unknown>> {
   type: SessionEventType;

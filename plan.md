@@ -162,13 +162,43 @@ live-tested against Wandbox.
 - [x] Keystroke / AI-interaction **replay timeline** — `GET /sessions/{id}/events` + interviewer scrubber
 - [x] Background LLM **push-back questions** (interviewer-only, opt-in `enable_pushback`) —
   `services/pushback.py`, `pushback` WS event stripped from candidates
-- [x] Pre-interview **config UI** — hallucination %, AI token limit, query quota, test cases,
-  guardrail preset + free-text (`CreateSessionForm`)
-- [x] **AI query quota** per candidate (Redis `INCR`) — enforced in `ws.py`, remaining shown to candidate
+- [x] Pre-interview **config UI** — 4-step wizard (basics → type → problem → AI behavior); see §7a
+- [x] **AI token budget** per session (Redis `INCRBY` against Anthropic's `usage_metadata`) — replaces
+  the old query quota / per-reply `max_tokens` split; remaining tokens shown live to both sides
 - [x] **Cheat detection** — Monaco paste listener → `paste` WS event → `paste_flag` logged + interviewer warning
 
-> Schema migrations: `0002_d2_config` adds D2 columns; `0003_rename_room_to_session` renames the
-> "room/recruiter" terminology to "session/interviewer" in place. **Run `alembic upgrade head`** to apply.
+## 7a. Phase 2 — interview-type wizard + token budget (implemented 2026-05-26)
+
+- [x] `interview_type` column on `interview_sessions` (algorithm / api / debugging / code_review /
+  refactor / sql / tdd / system_design). Migration `0004_interview_type_token_budget`.
+- [x] Backend `INTERVIEW_TYPES` defaults table (`schemas.py`); frontend `INTERVIEW_TYPES` mirror
+  (`lib/types.ts`) feeds the wizard's recommended values.
+- [x] New `syntax_only` guardrail preset (restricts AI to language syntax/stdlib).
+- [x] Token-budget mechanic: `token_budget` column replaces `query_quota` + `ai_max_tokens`; counts
+  Anthropic's exact `input_tokens + output_tokens` per call into `tokens:{session_id}:total` in
+  Redis; `token_budget` WS event broadcasts state.
+- [x] `agent.generate_reply` returns `(text, tokens_used)` so the WS handler can accumulate usage.
+- [x] Multi-step wizard component (`components/CreateSessionForm.tsx`): Basics → Type → Problem →
+  AI behavior. Picking a type pre-fills the AI-behavior step.
+
+## 7b. Phase 3 — CodeSignal layout + waiting room (implemented 2026-05-26)
+
+- [x] `react-resizable-panels` (v2) wired into the candidate IDE and interviewer dashboard.
+  Outer horizontal split: Problem (left, collapsible) | Editor + Terminal (center, vertical
+  split) | AI chat (right, collapsible). Layouts persist via `autoSaveId`.
+- [x] **Terminal panel** at the bottom of the editor on the candidate side; the interviewer view
+  shows the candidate's last-run summary in the same place.
+- [x] **Waiting room** — `session_participants.admitted` (migration `0005_waiting_room`). Candidate
+  joins → `admitted=false` → sees a waiting screen. Interviewer's participant panel lists everyone
+  with an Admit button. Interviewer creator is always admitted.
+- [x] **Kick** — interviewer can remove any participant (except themselves); the targeted socket
+  sees a `kicked` event with its own profile id, self-closes, and the candidate is shown a
+  "removed from the interview" page.
+- [x] **Participants** panel on the interviewer dashboard (left column, below Problem) with live
+  Admit / Kick buttons and waiting-count badge in the header.
+
+> Schema migrations applied in order: `0001_initial` → `0002_d2_config` → `0003_rename_room_to_session`
+> → `0004_interview_type_token_budget` → `0005_waiting_room`. **Run `alembic upgrade head`** to apply.
 
 ## 8. Status
 
@@ -178,11 +208,14 @@ candidate joins → live WS code/chat sync → Claude reply → hallucination fl
 → interview end → LLM scorecard. The only remaining D1 item is deployment. AI is cost-optimized:
 Haiku model, capped `max_tokens`, capped chat history. Run locally via `SETUP.md`.
 
-**Phase 1 redesign (2026-05-26):** renamed recruiter→interviewer + room→session across the
-backend, frontend, DB schema (migration 0003), and docs; restructured the dashboard so `/dashboard`
-is a searchable session list with a "+ New session" button leading to `/dashboard/new`. Phase 2
-(wizard, interview types, token budget) and Phase 3 (CodeSignal-style resizable layout, waiting
-room with kick, VSCode-style terminal panel) are planned but not yet started.
+**Phase 1–3 redesign (2026-05-26):** all three phases shipped in a single sitting. Phase 1 renamed
+recruiter→interviewer + room→session everywhere (migration 0003) and turned `/dashboard` into a
+searchable session list. Phase 2 added the multi-step wizard, 8 interview types with sensible AI
+defaults, the new `syntax_only` guardrail preset, and reworked the AI throttle from
+"messages + per-reply tokens" to a single session-wide `token_budget` counting Anthropic's exact
+input + output tokens (migration 0004). Phase 3 rebuilt the IDE around `react-resizable-panels`
+(Problem | Editor+Terminal | Chat), added a VSCode-style terminal panel, and introduced the
+waiting-room flow with interviewer admit/kick (migration 0005).
 
 | Milestone | Status |
 |---|---|
@@ -191,10 +224,10 @@ room with kick, VSCode-style terminal panel) are planned but not yet started.
 | Deliverable 1 features (auth, sessions, live sync, AI, hallucinator, scorecard) | ✅ Done |
 | Deliverable 1 — live E2E (auth→session→AI→scorecard) | ✅ Verified vs real Supabase + Anthropic |
 | Deliverable 2 features (§7: exec, replay, push-back, config UI, quota, cheat flag) | ✅ Code-complete (static-verified; exec live-tested) |
-| Deliverable 2 — live E2E | ⬜ Pending: apply `0003` migration + run with Docker up |
-| Phase 1 redesign (renames + dashboard restructure) | ✅ Code-complete; needs `alembic upgrade head` |
-| Phase 2 (wizard + interview types + token budget) | ⬜ Not started |
-| Phase 3 (CodeSignal layout + waiting room + terminal + kick) | ⬜ Not started |
+| Phase 1 redesign (renames + dashboard restructure) | ✅ Code-complete |
+| Phase 2 (wizard + interview types + token budget) | ✅ Code-complete (statically verified) |
+| Phase 3 (CodeSignal layout + waiting room + terminal + kick) | ✅ Code-complete (statically verified) |
+| Live E2E of the redesign | ⬜ Pending: apply migrations 0003–0005 + run with Docker up |
 | Deployment (Supabase + Render) | ⬜ Not started |
 
 > **Auth note:** Supabase signs user tokens with **ES256** (asymmetric signing keys); the backend

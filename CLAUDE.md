@@ -26,8 +26,13 @@ whether candidates *critically evaluate* AI output instead of copying it. Origin
 - "Room" → **session** everywhere (DB tables, URLs, types, vars). A DevLens *session* is one
   interview run — its problem, AI config, transcripts, events, and scorecard.
 
-Migration `0003_rename_room_to_session` renames the schema in place (Postgres 10+ enum value
-rename + table/column/index renames). Run `uv run alembic upgrade head` to apply.
+Migration order (apply all five with `uv run alembic upgrade head`):
+- `0001_initial` — initial six tables
+- `0002_d2_config` — Deliverable 2 columns
+- `0003_rename_room_to_session` — Phase 1 rename (in-place; Postgres 10+ enum value rename)
+- `0004_interview_type_token_budget` — Phase 2: adds `interview_type`, `token_budget`; drops
+  `query_quota`, `ai_max_tokens`
+- `0005_waiting_room` — Phase 3: adds `session_participants.admitted`
 
 ## Tech stack (locked — see plan.md §3 before changing)
 

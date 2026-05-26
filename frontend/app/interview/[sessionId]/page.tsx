@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
 import { api } from "@/lib/api";
@@ -14,9 +15,24 @@ const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr
 
 const PASTE_THRESHOLD = 40; // chars; larger pastes get flagged
 
-// Candidate IDE: Monaco editor (code_change + paste detection) + AI chat + Run (code execution).
+interface Participant {
+  profile_id: string;
+  role: string;
+  admitted: boolean;
+  display_name: string;
+}
+
+// Candidate IDE: CodeSignal-style resizable layout.
+//   ┌─────────┬───────────────────┬───────┐
+//   │ Problem │ Editor            │ Chat  │
+//   │  (left) ├───────────────────┤       │
+//   │         │ Terminal          │       │
+//   └─────────┴───────────────────┴───────┘
+// All three outer columns are resizable; the editor/terminal vertical split is resizable too.
+// Until the interviewer admits the candidate, the whole UI is replaced with a waiting screen.
 export default function CandidateSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const router = useRouter();
   const [language, setLanguage] = useState("python");
   const [prompt, setPrompt] = useState("");
   const [code, setCode] = useState("");
@@ -29,11 +45,15 @@ export default function CandidateSessionPage() {
     null,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  const [myProfileId, setMyProfileId] = useState<string | null>(null);
+  const [admitted, setAdmitted] = useState<boolean | null>(null);
+  const [kicked, setKicked] = useState(false);
 
   const socketRef = useRef<SessionSocket | null>(null);
   const codeRef = useRef("");
   const languageRef = useRef("python");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const myProfileIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let socket: SessionSocket | null = null;
@@ -56,6 +76,16 @@ export default function CandidateSessionPage() {
           setBusy(false);
           setNotice("AI token budget reached — no more AI help for this interview.");
         }
+      } else if (e.type === "participants") {
+        const p = e.payload as { participants: Participant[] };
+        const me = p.participants.find((x) => x.profile_id === myProfileIdRef.current);
+        if (me) setAdmitted(me.admitted);
+      } else if (e.type === "kicked") {
+        const p = e.payload as { profile_id: string };
+        if (p.profile_id === myProfileIdRef.current) {
+          setKicked(true);
+          socketRef.current?.close();
+        }
       }
     }
 
@@ -63,6 +93,9 @@ export default function CandidateSessionPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
+      const uid = data.session?.user.id ?? null;
+      setMyProfileId(uid);
+      myProfileIdRef.current = uid;
       if (!token) {
         setStatus("not signed in");
         return;
@@ -140,76 +173,164 @@ export default function CandidateSessionPage() {
     }
   }
 
+  if (kicked) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 className="text-2xl font-bold">You were removed from the interview</h1>
+        <p className="text-sm text-neutral-400">
+          The interviewer ended your participation in this session.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="mx-auto rounded bg-white px-4 py-2 text-sm font-medium text-black"
+        >
+          Back to home
+        </button>
+      </main>
+    );
+  }
+
+  if (admitted === false) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <div className="mx-auto h-12 w-12 animate-pulse rounded-full bg-emerald-500/30" />
+        <h1 className="text-2xl font-bold">Waiting for the interviewer…</h1>
+        <p className="text-sm text-neutral-400">
+          You&apos;ve joined the session. The interviewer needs to admit you before the interview
+          starts. Keep this tab open.
+        </p>
+        <p className="text-xs text-neutral-600">Connection: {status}</p>
+      </main>
+    );
+  }
+
+  // From here on the candidate is admitted (or admit state hasn't loaded yet — we render the
+  // IDE optimistically since the WS gate enforces correctness server-side).
   return (
     <main className="flex h-screen flex-col">
-      <header className="border-b border-neutral-800 px-4 py-2">
+      <header className="flex items-center gap-3 border-b border-neutral-800 px-4 py-2">
         <h1 className="text-sm font-semibold">Interview · {status}</h1>
-        {prompt && <p className="mt-1 text-xs text-neutral-400">{prompt}</p>}
+        {budget && (
+          <span className="text-xs text-neutral-400">
+            AI tokens: {budget.used.toLocaleString()} / {budget.budget.toLocaleString()} (
+            {budget.remaining.toLocaleString()} left)
+          </span>
+        )}
+        {notice && <span className="text-xs text-amber-400">{notice}</span>}
       </header>
-      <div className="grid flex-1 grid-cols-[1fr_380px] overflow-hidden">
-        <div className="flex flex-col border-r border-neutral-800">
-          <div className="flex items-center gap-3 border-b border-neutral-800 px-3 py-1.5">
-            <button
-              type="button"
-              onClick={runCode}
-              disabled={running}
-              className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {running ? "Running..." : "Run"}
-            </button>
-            {runResult && runResult.total > 0 && (
-              <span className="text-xs text-neutral-300">
-                {runResult.passed}/{runResult.total} tests passed
-              </span>
-            )}
-          </div>
-          <div className="flex-1">
-            <CodeEditor value={code} language={language} onChange={onCodeChange} onPaste={onPaste} />
-          </div>
-          {runResult && (
-            <div className="max-h-48 overflow-y-auto border-t border-neutral-800 p-2 text-xs">
-              {runResult.total === 0 ? (
-                <pre className="whitespace-pre-wrap text-neutral-300">
-                  {runResult.stdout || runResult.stderr || "(no output)"}
-                </pre>
-              ) : (
-                <ul className="space-y-1">
-                  {runResult.results.map((r, i) => (
-                    <li key={i}>
-                      <span className={r.passed ? "text-emerald-400" : "text-red-400"}>
-                        {r.passed ? "✓" : "✗"} {r.name}
+      <div className="flex-1 overflow-hidden">
+        <PanelGroup direction="horizontal" autoSaveId="interview-candidate-h">
+          <Panel
+            defaultSize={22}
+            minSize={5}
+            collapsible
+            collapsedSize={3}
+            className="overflow-hidden"
+          >
+            <div className="flex h-full flex-col border-r border-neutral-800 bg-neutral-950">
+              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                Problem
+              </div>
+              <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-3 text-sm text-neutral-200">
+                {prompt || <span className="text-neutral-500">(no problem statement)</span>}
+              </div>
+            </div>
+          </Panel>
+          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
+          <Panel defaultSize={53} minSize={30}>
+            <PanelGroup direction="vertical" autoSaveId="interview-candidate-v">
+              <Panel defaultSize={70} minSize={20}>
+                <div className="flex h-full flex-col">
+                  <div className="flex items-center gap-3 border-b border-neutral-800 px-3 py-1.5">
+                    <button
+                      type="button"
+                      onClick={runCode}
+                      disabled={running}
+                      className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      {running ? "Running..." : "Run"}
+                    </button>
+                    {runResult && runResult.total > 0 && (
+                      <span className="text-xs text-neutral-300">
+                        {runResult.passed}/{runResult.total} tests passed
                       </span>
-                      {r.hidden && <span className="text-neutral-500"> (hidden)</span>}
-                      {!r.hidden && !r.passed && (
-                        <span className="text-neutral-500">
-                          {" "}
-                          expected <code>{r.expected}</code>, got <code>{r.actual}</code>
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <CodeEditor
+                      value={code}
+                      language={language}
+                      onChange={onCodeChange}
+                      onPaste={onPaste}
+                    />
+                  </div>
+                </div>
+              </Panel>
+              <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
+              <Panel defaultSize={30} minSize={8} collapsible collapsedSize={4}>
+                <div className="flex h-full flex-col border-t border-neutral-800 bg-black">
+                  <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                    <span>Terminal</span>
+                    {runResult && (
+                      <span className="text-neutral-500">
+                        exit {runResult.total > 0 ? `${runResult.passed}/${runResult.total}` : "ok"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-auto p-2 font-mono text-xs">
+                    {!runResult && (
+                      <span className="text-neutral-600">Click Run to execute your code.</span>
+                    )}
+                    {runResult && runResult.total === 0 && (
+                      <pre className="whitespace-pre-wrap text-neutral-300">
+                        {runResult.stdout || runResult.stderr || "(no output)"}
+                      </pre>
+                    )}
+                    {runResult && runResult.total > 0 && (
+                      <ul className="space-y-1">
+                        {runResult.results.map((r, i) => (
+                          <li key={i}>
+                            <span className={r.passed ? "text-emerald-400" : "text-red-400"}>
+                              {r.passed ? "✓" : "✗"} {r.name}
+                            </span>
+                            {r.hidden && <span className="text-neutral-500"> (hidden)</span>}
+                            {!r.hidden && !r.passed && (
+                              <span className="text-neutral-500">
+                                {" "}
+                                expected <code>{r.expected}</code>, got <code>{r.actual}</code>
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </Panel>
+            </PanelGroup>
+          </Panel>
+          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
+          <Panel
+            defaultSize={25}
+            minSize={5}
+            collapsible
+            collapsedSize={3}
+            className="overflow-hidden"
+          >
+            <div className="flex h-full flex-col border-l border-neutral-800">
+              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                AI assistant
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <ChatBox messages={messages} onSend={onSend} busy={busy} />
+              </div>
             </div>
-          )}
-        </div>
-        <div className="flex flex-col overflow-hidden">
-          {(budget || notice) && (
-            <div className="border-b border-neutral-800 px-3 py-1.5 text-xs">
-              {budget && (
-                <span className="text-neutral-400">
-                  AI tokens: {budget.used.toLocaleString()} / {budget.budget.toLocaleString()} used
-                  ({budget.remaining.toLocaleString()} left)
-                </span>
-              )}
-              {notice && <span className="ml-2 text-amber-400">{notice}</span>}
-            </div>
-          )}
-          <div className="flex-1 overflow-hidden">
-            <ChatBox messages={messages} onSend={onSend} busy={busy} />
-          </div>
-        </div>
+          </Panel>
+        </PanelGroup>
       </div>
+      {/* Suppress unused-state warnings; myProfileId is captured into the ref for handlers. */}
+      <span hidden>{myProfileId}</span>
     </main>
   );
 }
