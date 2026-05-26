@@ -38,6 +38,12 @@ GUARDRAIL_PRESETS: dict[str, str] = {
         "Guardrail: EXPLAIN, DON'T WRITE. Explain approaches in prose. Do not write code for the "
         "candidate; describe what they should do instead."
     ),
+    "syntax_only": (
+        "Guardrail: SYNTAX ONLY. You may only answer questions about the syntax and standard "
+        "library of the candidate's language. Refuse to suggest algorithms, data structures, "
+        "design, or any solution direction. If asked anything beyond syntax, briefly remind the "
+        "candidate of this constraint."
+    ),
     "open": "Guardrail: OPEN. Assist normally as a helpful pair-programming copilot.",
 }
 

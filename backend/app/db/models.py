@@ -84,20 +84,25 @@ class InterviewSession(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     starting_code: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
+    # Interview kind drives the wizard's recommended AI defaults; see schemas.INTERVIEW_TYPES.
+    interview_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default="algorithm", default="algorithm"
+    )
+
     # AI config
     guardrail_preset: Mapped[str] = mapped_column(String(40), nullable=False, default="hints_only")
     guardrail_custom: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hallucination_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # Deliverable 2 config
     # test_cases: list of {stdin, expected, hidden} run by the code-execution sandbox
     test_cases: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list
     )
-    query_quota: Mapped[int] = mapped_column(
+    # Session-wide AI throttle: cap on (input + output) tokens summed across the whole interview.
+    # 0 = unlimited. Counted in Redis (`tokens:{session_id}:total`) from response.usage_metadata.
+    token_budget: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0
-    )  # 0 = unlimited candidate AI queries
-    ai_max_tokens: Mapped[int | None] = mapped_column(Integer)  # None = server default
+    )
     enable_pushback: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )

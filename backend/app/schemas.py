@@ -10,7 +10,67 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import Role, SessionStatus
 
-GUARDRAIL_PRESETS = ("hints_only", "no_full_solutions", "explain_dont_write", "open")
+GUARDRAIL_PRESETS = (
+    "hints_only",
+    "no_full_solutions",
+    "explain_dont_write",
+    "syntax_only",
+    "open",
+)
+
+# Interview kinds the wizard offers. The wizard pre-fills the AI behavior step from these defaults;
+# the interviewer can still override anything before saving. Frontend mirrors this list in
+# lib/types.ts so the UI cards stay in sync.
+INTERVIEW_TYPES: dict[str, dict[str, Any]] = {
+    "algorithm": {
+        "label": "Algorithm / LeetCode",
+        "guardrail_preset": "syntax_only",
+        "hallucination_pct": 0,
+        "token_budget": 4000,
+    },
+    "api": {
+        "label": "API integration",
+        "guardrail_preset": "hints_only",
+        "hallucination_pct": 0,
+        "token_budget": 12000,
+    },
+    "debugging": {
+        "label": "Debugging",
+        "guardrail_preset": "explain_dont_write",
+        "hallucination_pct": 30,
+        "token_budget": 6000,
+    },
+    "code_review": {
+        "label": "Code review",
+        "guardrail_preset": "open",
+        "hallucination_pct": 0,
+        "token_budget": 4000,
+    },
+    "refactor": {
+        "label": "Refactor / optimize",
+        "guardrail_preset": "hints_only",
+        "hallucination_pct": 0,
+        "token_budget": 6000,
+    },
+    "sql": {
+        "label": "SQL / data query",
+        "guardrail_preset": "syntax_only",
+        "hallucination_pct": 0,
+        "token_budget": 3000,
+    },
+    "tdd": {
+        "label": "Test writing (TDD)",
+        "guardrail_preset": "explain_dont_write",
+        "hallucination_pct": 0,
+        "token_budget": 4000,
+    },
+    "system_design": {
+        "label": "System design",
+        "guardrail_preset": "open",
+        "hallucination_pct": 0,
+        "token_budget": 20000,
+    },
+}
 
 
 class TestCase(BaseModel):
@@ -31,14 +91,14 @@ class ProfileOut(BaseModel):
 class SessionCreate(BaseModel):
     title: str = Field(default="Untitled interview", max_length=255)
     language: str = Field(default="python", max_length=40)
+    interview_type: str = Field(default="algorithm", max_length=40)
     prompt: str = ""
     starting_code: str = ""
     guardrail_preset: str = Field(default="hints_only")
     guardrail_custom: str = ""
     hallucination_pct: int = Field(default=0, ge=0, le=100)
     test_cases: list[TestCase] = Field(default_factory=list)
-    query_quota: int = Field(default=0, ge=0, le=1000)
-    ai_max_tokens: int | None = Field(default=None, ge=64, le=8192)
+    token_budget: int = Field(default=0, ge=0, le=200000)
     enable_pushback: bool = False
 
 
@@ -52,14 +112,14 @@ class SessionOut(BaseModel):
     created_by: uuid.UUID
     title: str
     language: str
+    interview_type: str
     prompt: str
     starting_code: str
     guardrail_preset: str
     guardrail_custom: str
     hallucination_pct: int
     test_cases: list[TestCase]
-    query_quota: int
-    ai_max_tokens: int | None
+    token_budget: int
     enable_pushback: bool
     status: SessionStatus
     created_at: datetime
@@ -74,9 +134,10 @@ class SessionCandidateView(BaseModel):
     id: uuid.UUID
     title: str
     language: str
+    interview_type: str
     prompt: str
     starting_code: str
-    query_quota: int
+    token_budget: int
     status: SessionStatus
 
 
@@ -87,6 +148,7 @@ class SessionSummary(BaseModel):
     join_code: str
     title: str
     language: str
+    interview_type: str
     status: SessionStatus
     created_at: datetime
 

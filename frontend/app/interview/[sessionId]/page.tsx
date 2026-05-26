@@ -25,7 +25,9 @@ export default function CandidateSessionPage() {
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
-  const [quota, setQuota] = useState<{ remaining: number; quota: number } | null>(null);
+  const [budget, setBudget] = useState<{ used: number; budget: number; remaining: number } | null>(
+    null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const socketRef = useRef<SessionSocket | null>(null);
@@ -42,12 +44,17 @@ export default function CandidateSessionPage() {
         const p = e.payload as { content: string };
         setMessages((m) => [...m, { role: "assistant", content: p.content }]);
         setBusy(false);
-      } else if (e.type === "quota") {
-        const p = e.payload as { remaining: number; quota: number; blocked?: boolean };
-        setQuota({ remaining: p.remaining, quota: p.quota });
+      } else if (e.type === "token_budget") {
+        const p = e.payload as {
+          used: number;
+          budget: number;
+          remaining: number;
+          blocked?: boolean;
+        };
+        setBudget({ used: p.used, budget: p.budget, remaining: p.remaining });
         if (p.blocked) {
           setBusy(false);
-          setNotice("AI query quota reached — no more AI help for this interview.");
+          setNotice("AI token budget reached — no more AI help for this interview.");
         }
       }
     }
@@ -71,8 +78,12 @@ export default function CandidateSessionPage() {
           setCode(interview.starting_code);
           codeRef.current = interview.starting_code;
         }
-        if ("query_quota" in interview && interview.query_quota > 0) {
-          setQuota({ remaining: interview.query_quota, quota: interview.query_quota });
+        if ("token_budget" in interview && interview.token_budget > 0) {
+          setBudget({
+            used: 0,
+            budget: interview.token_budget,
+            remaining: interview.token_budget,
+          });
         }
       } catch {
         // non-fatal
@@ -108,8 +119,8 @@ export default function CandidateSessionPage() {
   }
 
   function onSend(content: string) {
-    if (quota && quota.remaining <= 0) {
-      setNotice("AI query quota reached — no more AI help for this interview.");
+    if (budget && budget.remaining <= 0) {
+      setNotice("AI token budget reached — no more AI help for this interview.");
       return;
     }
     setMessages((m) => [...m, { role: "user", content }]);
@@ -183,11 +194,12 @@ export default function CandidateSessionPage() {
           )}
         </div>
         <div className="flex flex-col overflow-hidden">
-          {(quota || notice) && (
+          {(budget || notice) && (
             <div className="border-b border-neutral-800 px-3 py-1.5 text-xs">
-              {quota && (
+              {budget && (
                 <span className="text-neutral-400">
-                  AI queries left: {quota.remaining}/{quota.quota}
+                  AI tokens: {budget.used.toLocaleString()} / {budget.budget.toLocaleString()} used
+                  ({budget.remaining.toLocaleString()} left)
                 </span>
               )}
               {notice && <span className="ml-2 text-amber-400">{notice}</span>}

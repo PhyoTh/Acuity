@@ -10,7 +10,7 @@ export type SessionEventType =
   | "paste" // candidate -> server: large paste detected
   | "paste_flag" // server -> interviewer: cheat flag
   | "code_run" // server -> session: run summary
-  | "quota" // server -> session: AI query quota state
+  | "token_budget" // server -> session: AI token-budget usage state
   | "pushback"; // server -> interviewer: suggested questions
 
 export interface SessionEvent<T = Record<string, unknown>> {
