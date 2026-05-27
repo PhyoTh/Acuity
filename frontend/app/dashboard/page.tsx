@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardSidebar } from "@/components/Dashboard/Sidebar";
-import { Avatar, HeatStrip, Icon, Pill, Progress, SectionLabel, Stat } from "@/components/ui";
+import { ScheduleCalendar } from "@/components/Dashboard/ScheduleCalendar";
+import { Avatar, HeatStrip, Icon, Pill, Progress, SectionLabel, Sparkline } from "@/components/ui";
 import { api } from "@/lib/api";
-import { ACTIVITY, STATS } from "@/lib/mocks";
+import { ACTIVITY, API_BALANCE, TOKENS_MINE } from "@/lib/mocks";
 import type { Profile, SessionStatus, SessionSummary } from "@/lib/types";
 
 const FILTERS: ("all" | SessionStatus)[] = ["all", "active", "pending", "ended"];
@@ -88,36 +89,55 @@ export default function DashboardHome() {
           </div>
         </header>
 
-        {/* Stats row — mock per plan.md §9b */}
-        <div className="mt-8 grid gap-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <Stat
-            label="Sessions this week"
-            value={STATS.sessionsThisWeek.value}
-            sub={STATS.sessionsThisWeek.sub}
-            spark={STATS.sessionsThisWeek.spark}
-            accent="var(--fg-0)"
-          />
-          <Stat
-            label="Avg. caught AI errors"
-            value={STATS.avgCaught.value}
-            sub={STATS.avgCaught.sub}
-            spark={STATS.avgCaught.spark}
-            accent="var(--warn)"
-          />
-          <Stat
-            label="Median scorecard"
-            value={STATS.medianScore.value}
-            sub={STATS.medianScore.sub}
-            spark={STATS.medianScore.spark}
-            accent="var(--signal)"
-          />
-          <Stat
-            label="Tokens spent"
-            value={STATS.tokensSpent.value}
-            sub={STATS.tokensSpent.sub}
-            spark={STATS.tokensSpent.spark}
+        {/* Header row: my tokens + shared API balance | separator | schedule calendar.
+            Both stat tiles are mock per plan.md §9b — we don't yet aggregate Anthropic
+            usage per-user and there's no billing API integration. */}
+        <div
+          className="mt-8 grid items-stretch gap-6"
+          style={{ gridTemplateColumns: "1fr 1fr auto 1.4fr" }}
+        >
+          <UsageTile
+            label="Your tokens"
+            value={TOKENS_MINE.value}
+            sub={TOKENS_MINE.sub}
+            spark={TOKENS_MINE.spark}
             accent="var(--live)"
+            footnote="just your sessions"
           />
+          <UsageTile
+            label="API balance"
+            value={API_BALANCE.spentLabel}
+            sub={`/ ${API_BALANCE.totalLabel} · ${API_BALANCE.remainingLabel}`}
+            progress={{ value: API_BALANCE.used, max: API_BALANCE.total, color: "var(--signal)" }}
+            accent="var(--signal)"
+            footnote="shared across the team"
+          />
+          {/* Visual separator between personal usage (left) and team-wide schedule (right). */}
+          <div
+            aria-hidden
+            style={{
+              width: 1,
+              alignSelf: "stretch",
+              background: "var(--line-2)",
+              margin: "4px 4px",
+            }}
+          />
+          <div
+            style={{
+              background: "var(--bg-1)",
+              border: "1px solid var(--line-1)",
+              borderRadius: "var(--radius-lg)",
+              padding: 16,
+            }}
+          >
+            <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+              <SectionLabel>Schedule</SectionLabel>
+              <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10 }}>
+                click a dot to view
+              </span>
+            </div>
+            <ScheduleCalendar sessions={sessions} />
+          </div>
         </div>
 
         {/* Live session callout */}
@@ -285,9 +305,9 @@ export default function DashboardHome() {
               </div>
               <div className="mt-3 flex flex-col gap-2">
                 {[
-                  { title: "Algorithm",     sub: "syntax_only · 4k tokens", recommended: false },
-                  { title: "Debugging",     sub: "hints_only · 30% halluc · 6k", recommended: true },
-                  { title: "System design", sub: "open · 20k tokens",       recommended: false },
+                  { title: "Algorithm",     sub: "syntax_only · 4k tokens" },
+                  { title: "Debugging",     sub: "hints_only · 30% halluc · 6k" },
+                  { title: "System design", sub: "open · 20k tokens" },
                 ].map((p) => (
                   <Link
                     key={p.title}
@@ -307,7 +327,6 @@ export default function DashboardHome() {
                         {p.sub}
                       </div>
                     </div>
-                    {p.recommended && <Pill kind="live">recommended</Pill>}
                   </Link>
                 ))}
               </div>
@@ -405,4 +424,58 @@ function greetingForNow(): string {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+// Big number + optional sparkline or progress bar + small footnote clarifying scope
+// (your own vs shared). Used for the "your tokens" / "API balance" tiles.
+function UsageTile({
+  label,
+  value,
+  sub,
+  spark,
+  progress,
+  accent,
+  footnote,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  spark?: number[];
+  progress?: { value: number; max: number; color: string };
+  accent: string;
+  footnote: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--bg-1)",
+        border: "1px solid var(--line-1)",
+        borderRadius: "var(--radius-lg)",
+        padding: 18,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <SectionLabel>{label}</SectionLabel>
+        <span className="mono" style={{ color: "var(--fg-3)", fontSize: 9.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          {footnote}
+        </span>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div className="display tabular" style={{ fontSize: 36, lineHeight: 1, color: accent }}>
+          {value}
+        </div>
+        {spark && spark.length > 0 && (
+          <Sparkline values={spark} width={84} height={28} color={accent} />
+        )}
+      </div>
+      {progress && (
+        <div className="mt-3">
+          <Progress value={progress.value} max={progress.max} color={progress.color} />
+        </div>
+      )}
+      <div className="mono mt-2" style={{ color: "var(--fg-2)", fontSize: 11 }}>{sub}</div>
+    </div>
+  );
 }

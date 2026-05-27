@@ -173,11 +173,21 @@ secret must stay server-side; only `NEXT_PUBLIC_*` vars reach the browser.
   ALL-CAPS section labels). Use the `components/ui/` primitives instead of hand-rolling
   pills, cards, etc.
 - **Mock vs live data:** anything the roadmap depicts that doesn't have a backend yet
-  (dashboard stats, activity feed, scheduling, share-link, export PDF, etc. — see plan.md §9b
-  for the full list) is rendered from `lib/mocks.ts` with no live fetch. Treat that file as
-  "to be wired up later"; do not pretend a card is live when it isn't. **Real data flows
-  (auth, WS sync, code execution, scorecard) must remain untouched** — the overhaul is
-  visual, not behavioral.
+  (per-user token usage, shared API balance, activity feed, scheduling, share-link, export
+  PDF, etc. — see plan.md §9b for the full list) is rendered from `lib/mocks.ts` with no
+  live fetch. Treat that file as "to be wired up later"; do not pretend a card is live when
+  it isn't. **Real data flows (auth, WS sync, code execution, scorecard) must remain
+  untouched** — the overhaul is visual, not behavioral.
+- **UI-promised features awaiting backend** (plan.md §9c): **custom guardrail presets**
+  (user-scoped library of named policies, beyond the 5 built-ins), **per-user Anthropic
+  key** (BYO key stored encrypted on `profiles`), and **session scheduling**
+  (`scheduled_at` column + a job that flips `pending → active`). The landing copy + dashboard
+  calendar + planned Settings panel all assume these will land — don't promise them in new
+  surfaces without flagging them as mock.
+- **Wordmark is not a link on authenticated interviewer pages** (sidebar, live-session
+  header, summary header). It's a static brand mark — never wrap it in `<Link href="/">`
+  inside `/dashboard/*`. If an interviewer wants to log out they use the user menu, not the
+  wordmark. (The candidate side intentionally also has a static wordmark.)
 
 ## Architecture notes
 

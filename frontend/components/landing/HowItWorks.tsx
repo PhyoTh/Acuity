@@ -157,7 +157,6 @@ function PreviewSetTrap() {
       <div className="grid grid-cols-2 gap-2">
         {formats.map((f) => {
           const isActive = f === format;
-          const isSig = f === "Debugging";
           return (
             <button
               key={f}
@@ -171,13 +170,9 @@ function PreviewSetTrap() {
                 color: "var(--fg-0)",
                 textAlign: "left",
                 cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
               }}
             >
               {f}
-              {isSig && <span style={{ color: "var(--warn)" }}>★</span>}
             </button>
           );
         })}
@@ -354,7 +349,7 @@ function ReplayDots() {
 const EIGHT: readonly { title: string; tag: string; tokens: string; guardrail: string }[] = [
   { title: "Algorithm / LeetCode", tag: "syntax-only · 0% halluc", tokens: "4k tokens", guardrail: "syntax_only" },
   { title: "API integration",      tag: "hints · 12k tokens",      tokens: "12k tokens", guardrail: "hints_only" },
-  { title: "Debugging ★",          tag: "30% halluc",              tokens: "6k tokens",  guardrail: "hints_only" },
+  { title: "Debugging",            tag: "30% halluc",              tokens: "6k tokens",  guardrail: "hints_only" },
   { title: "Code review",          tag: "open · 4k tokens",        tokens: "4k tokens",  guardrail: "open" },
   { title: "Refactor / optimize",  tag: "same-behavior tests",     tokens: "6k tokens",  guardrail: "no_full_solutions" },
   { title: "SQL / data query",     tag: "expected-output",         tokens: "3k tokens",  guardrail: "hints_only" },
