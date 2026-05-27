@@ -9,6 +9,7 @@ from __future__ import annotations
 import secrets
 import string
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,6 +24,7 @@ from app.db.models import (
     Profile,
     Role,
     Scorecard,
+    SessionFile,
     SessionParticipant,
     SessionStatus,
     Transcript,
@@ -39,6 +41,9 @@ from app.schemas import (
     ScorecardOut,
     SessionCandidateView,
     SessionCreate,
+    SessionFileCreate,
+    SessionFileOut,
+    SessionFileUpdate,
     SessionOut,
     SessionSummary,
     TestResult,
@@ -69,15 +74,26 @@ async def create_session(
     interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> InterviewSession:
-    if body.guardrail_preset not in GUARDRAIL_PRESETS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"guardrail_preset must be one of {GUARDRAIL_PRESETS}",
-        )
+    # Normalize guardrails — multi-select is the canonical form; the singular field is kept for
+    # legacy clients. Whatever the client sends, server-side both fields are populated and the
+    # list is the authoritative source.
+    presets = list(body.guardrail_presets) if body.guardrail_presets else [body.guardrail_preset]
+    presets = [p for p in presets if p in GUARDRAIL_PRESETS]
+    if not presets:
+        presets = ["hints_only"]
+    for p in presets:
+        if p not in GUARDRAIL_PRESETS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"guardrail preset must be one of {GUARDRAIL_PRESETS}",
+            )
+    data = body.model_dump()
+    data["guardrail_preset"] = presets[0]
+    data["guardrail_presets"] = presets
     interview = InterviewSession(
         join_code=await _generate_join_code(db),
         created_by=interviewer.id,
-        **body.model_dump(),
+        **data,
     )
     db.add(interview)
     await db.flush()
@@ -234,6 +250,19 @@ async def _require_participant(
     return interview
 
 
+async def _load_files(session_id: uuid.UUID, db: AsyncSession) -> dict[str, str]:
+    """Return a {path -> content} dict of non-folder files for a session, or empty if the
+    session is still using single-file mode (no rows in session_files)."""
+    rows = list(
+        await db.scalars(
+            select(SessionFile).where(
+                SessionFile.session_id == session_id, SessionFile.is_folder.is_(False)
+            )
+        )
+    )
+    return {r.path: r.content for r in rows}
+
+
 @router.post("/{session_id}/run", response_model=RunResult)
 async def run_session_code(
     session_id: uuid.UUID,
@@ -244,21 +273,42 @@ async def run_session_code(
     interview = await _require_participant(session_id, profile, db)
     is_interviewer = profile.role == Role.interviewer
     tests = interview.test_cases or []
+    files = await _load_files(session_id, db)
+    use_files = bool(files)
+    entry = executor.pick_entry_path(interview.language, list(files.keys())) if use_files else None
 
     if not tests:
-        out = await executor.run_code(language=interview.language, code=body.code)
+        if use_files:
+            out = await executor.run_code(
+                language=interview.language, files=files, entry=entry or ""
+            )
+        else:
+            out = await executor.run_code(language=interview.language, code=body.code)
         await _log_run(session_id, profile.role.value, 0, 0)
         return RunResult(passed=0, total=0, results=[], stdout=out["stdout"], stderr=out["stderr"])
 
     results: list[TestResult] = []
     passed = 0
     for i, tc in enumerate(tests):
-        out = await executor.run_code(
-            language=interview.language, code=body.code, stdin=str(tc.get("stdin", ""))
-        )
-        ok = out["stdout"].strip() == str(tc.get("expected", "")).strip()
+        if use_files:
+            out = await executor.run_code(
+                language=interview.language,
+                files=files,
+                entry=entry or "",
+                stdin=str(tc.get("stdin", "")),
+                call=str(tc.get("call", "")),
+            )
+        else:
+            out = await executor.run_code(
+                language=interview.language,
+                code=body.code,
+                stdin=str(tc.get("stdin", "")),
+                call=str(tc.get("call", "")),
+            )
+        ok = executor.outputs_match(out["stdout"], str(tc.get("expected", "")))
         passed += int(ok)
         hidden = bool(tc.get("hidden"))
+        # Candidates see the *pass/fail* of hidden tests but not the inputs/outputs.
         show = is_interviewer or not hidden
         results.append(
             TestResult(
@@ -273,6 +323,157 @@ async def run_session_code(
         )
     await _log_run(session_id, profile.role.value, passed, len(tests))
     return RunResult(passed=passed, total=len(tests), results=results)
+
+
+# --- Multi-file project endpoints ---------------------------------------------------------------
+# CRUD over `session_files`. Interviewer can seed files at create-time (wizard), and both sides
+# can mutate the tree during the live interview (changes broadcast via the `file_change` WS event
+# from ws.py). Folders are rows with is_folder=True and empty content.
+
+
+def _normalize_path(path: str) -> str:
+    """Reject paths with shell metacharacters, parent-traversal, leading slash, or empty
+    components. Returns the cleaned forward-slash path."""
+    p = path.strip().lstrip("/")
+    if not p or ".." in p.split("/") or any(c in p for c in ("\\", "\0")):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    return p
+
+
+@router.get("/{session_id}/files", response_model=list[SessionFileOut])
+async def list_files(
+    session_id: uuid.UUID,
+    profile: Annotated[Profile, Depends(get_current_profile)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[SessionFile]:
+    await _require_participant(session_id, profile, db)
+    rows = await db.scalars(
+        select(SessionFile)
+        .where(SessionFile.session_id == session_id)
+        .order_by(SessionFile.is_folder.desc(), SessionFile.path)
+    )
+    return list(rows)
+
+
+async def _broadcast_files_dirty(session_id: uuid.UUID) -> None:
+    """Notify other sockets in the session that the file tree changed (create / rename /
+    delete). Listeners re-fetch via `GET /sessions/{id}/files`. We broadcast on every
+    structural mutation; content edits already flow via the `file_change` WS event."""
+    await publish(
+        session_channel(str(session_id)),
+        {"type": "files_dirty", "payload": {}},
+    )
+
+
+@router.post(
+    "/{session_id}/files", response_model=SessionFileOut, status_code=status.HTTP_201_CREATED
+)
+async def create_file(
+    session_id: uuid.UUID,
+    body: SessionFileCreate,
+    profile: Annotated[Profile, Depends(get_current_profile)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionFile:
+    await _require_participant(session_id, profile, db)
+    path = _normalize_path(body.path)
+    existing = await db.scalar(
+        select(SessionFile).where(
+            SessionFile.session_id == session_id, SessionFile.path == path
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="A file or folder with that path exists")
+    f = SessionFile(
+        session_id=session_id,
+        path=path,
+        content="" if body.is_folder else body.content,
+        is_folder=body.is_folder,
+    )
+    db.add(f)
+    await db.commit()
+    await db.refresh(f)
+    await _broadcast_files_dirty(session_id)
+    return f
+
+
+@router.patch("/{session_id}/files/{file_id}", response_model=SessionFileOut)
+async def update_file(
+    session_id: uuid.UUID,
+    file_id: uuid.UUID,
+    body: SessionFileUpdate,
+    profile: Annotated[Profile, Depends(get_current_profile)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionFile:
+    await _require_participant(session_id, profile, db)
+    f = await db.get(SessionFile, file_id)
+    if f is None or f.session_id != session_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    path_changed = False
+    if body.path is not None and body.path != f.path:
+        new_path = _normalize_path(body.path)
+        clash = await db.scalar(
+            select(SessionFile).where(
+                SessionFile.session_id == session_id, SessionFile.path == new_path
+            )
+        )
+        if clash is not None and clash.id != f.id:
+            raise HTTPException(status_code=409, detail="A file at that path exists")
+        # Renaming a folder cascades to its descendants so paths stay consistent.
+        if f.is_folder:
+            old_prefix = f.path.rstrip("/") + "/"
+            new_prefix = new_path.rstrip("/") + "/"
+            descendants = list(
+                await db.scalars(
+                    select(SessionFile).where(
+                        SessionFile.session_id == session_id,
+                        SessionFile.path.startswith(old_prefix),
+                    )
+                )
+            )
+            for d in descendants:
+                d.path = new_prefix + d.path[len(old_prefix):]
+                d.updated_at = datetime.now(UTC)
+        f.path = new_path
+        path_changed = True
+    if body.content is not None and not f.is_folder:
+        f.content = body.content
+    f.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(f)
+    # Content-only PATCHes don't need to broadcast — the candidate already sent a `file_change`
+    # WS event live as they typed. Path renames DO need to broadcast because rename is HTTP-only.
+    if path_changed:
+        await _broadcast_files_dirty(session_id)
+    return f
+
+
+@router.delete("/{session_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file(
+    session_id: uuid.UUID,
+    file_id: uuid.UUID,
+    profile: Annotated[Profile, Depends(get_current_profile)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    await _require_participant(session_id, profile, db)
+    f = await db.get(SessionFile, file_id)
+    if f is None or f.session_id != session_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    # Deleting a folder removes everything underneath it so the tree stays consistent.
+    if f.is_folder:
+        prefix = f.path.rstrip("/") + "/"
+        descendants = list(
+            await db.scalars(
+                select(SessionFile).where(
+                    SessionFile.session_id == session_id,
+                    SessionFile.path.startswith(prefix),
+                )
+            )
+        )
+        for d in descendants:
+            await db.delete(d)
+    await db.delete(f)
+    await db.commit()
+    await _broadcast_files_dirty(session_id)
 
 
 async def _log_run(session_id: uuid.UUID, actor: str, passed: int, total: int) -> None:

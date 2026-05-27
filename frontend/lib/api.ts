@@ -11,6 +11,7 @@ import type {
   SessionCandidateView,
   SessionConfig,
   SessionCreateInput,
+  SessionFile,
   SessionSummary,
   TranscriptTurn,
 } from "@/lib/types";
@@ -61,4 +62,27 @@ export const api = {
     }),
   getEvents: (id: string) => request<EventRow[]>(`/sessions/${id}/events`),
   getTranscripts: (id: string) => request<TranscriptTurn[]>(`/sessions/${id}/transcripts`),
+  // Multi-file project tree
+  listFiles: (id: string) => request<SessionFile[]>(`/sessions/${id}/files`),
+  createFile: (id: string, body: { path: string; content?: string; is_folder?: boolean }) =>
+    request<SessionFile>(`/sessions/${id}/files`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateFile: (
+    id: string,
+    fileId: string,
+    body: { path?: string; content?: string },
+  ) =>
+    request<SessionFile>(`/sessions/${id}/files/${fileId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteFile: async (id: string, fileId: string) => {
+    const res = await fetch(`${API_URL}/sessions/${id}/files/${fileId}`, {
+      method: "DELETE",
+      headers: { ...(await authHeaders()) },
+    });
+    if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
+  },
 };

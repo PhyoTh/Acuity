@@ -15,15 +15,25 @@ const PRESET_LABELS: Record<string, string> = {
 export default function AIInfoHeader({
   model,
   guardrailPreset,
+  guardrailPresets,
   hallucinationPct,
 }: {
   model?: string;
   guardrailPreset?: string;
+  guardrailPresets?: string[];
   hallucinationPct?: number;
 }) {
-  if (!model && !guardrailPreset && (hallucinationPct ?? 0) === 0) return null;
+  const activePresets =
+    guardrailPresets && guardrailPresets.length > 0
+      ? guardrailPresets
+      : guardrailPreset
+        ? [guardrailPreset]
+        : [];
+  if (!model && activePresets.length === 0 && (hallucinationPct ?? 0) === 0) return null;
 
-  const presetLabel = guardrailPreset ? (PRESET_LABELS[guardrailPreset] ?? guardrailPreset) : null;
+  const presetLabel = activePresets.length
+    ? activePresets.map((p) => PRESET_LABELS[p] ?? p).join(" + ")
+    : null;
 
   return (
     <div className="space-y-1 border-b border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[11px] text-neutral-400">

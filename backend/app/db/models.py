@@ -91,6 +91,12 @@ class InterviewSession(Base):
 
     # AI config
     guardrail_preset: Mapped[str] = mapped_column(String(40), nullable=False, default="hints_only")
+    # Multi-select guardrails: the interviewer can stack any number of presets. `guardrail_preset`
+    # (singular) is retained for backward compat — it always equals `guardrail_presets[0]` when
+    # `guardrail_presets` has at least one entry.
+    guardrail_presets: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list
+    )
     guardrail_custom: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hallucination_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -183,6 +189,36 @@ class Transcript(Base):
     tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
+class SessionFile(Base):
+    """One file (or folder) in a session's project tree.
+
+    Multi-file support: the interviewer's create-session wizard uploads a tree of files; the
+    candidate sees the same tree in their IDE and can add/rename/delete/edit. Folders are
+    represented as rows with `is_folder=True` and empty `content`. `path` is a forward-slash
+    relative path from the project root (e.g. "src/utils/math.py"). Uniqueness on
+    (session_id, path) makes rename safe and lookups cheap.
+    """
+
+    __tablename__ = "session_files"
+    __table_args__ = (UniqueConstraint("session_id", "path", name="uq_session_file_path"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_folder: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 

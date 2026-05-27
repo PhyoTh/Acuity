@@ -4,8 +4,9 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
+import ReplayTimeline from "@/components/Dashboard/ReplayTimeline";
 import ScorecardPanel from "@/components/Dashboard/Scorecard";
-import type { RunResult, Scorecard } from "@/lib/types";
+import type { EventRow, RunResult, Scorecard } from "@/lib/types";
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
@@ -23,6 +24,7 @@ export default function SummaryView({
   lastRun,
   scorecard,
   scorecardLoading,
+  events = [],
 }: {
   title: string;
   createdAt: string;
@@ -34,6 +36,7 @@ export default function SummaryView({
   lastRun: RunResult | { passed: number; total: number } | null;
   scorecard: Scorecard | null;
   scorecardLoading: boolean;
+  events?: EventRow[];
 }) {
   const startedDate = createdAt ? new Date(createdAt) : null;
   const endedDate = endedAt ? new Date(endedAt) : null;
@@ -62,6 +65,13 @@ export default function SummaryView({
       </header>
 
       <div className="mx-auto max-w-5xl space-y-4 p-6">
+        {/* Replay timeline — idle gaps + tab switches + pastes + runs at a glance. */}
+        {events.length > 0 && (
+          <section className="rounded-lg border border-neutral-800 p-4">
+            <h2 className="mb-2 text-sm font-semibold text-neutral-200">Replay timeline</h2>
+            <ReplayTimeline events={events} />
+          </section>
+        )}
         {/* Scorecard — the headline */}
         <section className="rounded-lg border border-neutral-800 p-4">
           {scorecard ? (

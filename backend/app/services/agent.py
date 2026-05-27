@@ -83,10 +83,25 @@ async def generate_reply(
         )
 
     snippet = code.strip() or "(editor is empty)"
-    user_content = (
-        f"My current {language} code:\n```{language}\n{snippet}\n```\n\n"
-        f"Question: {query}"
-    )
+    # The candidate's frontend may send either a single buffer (single-file mode) or a
+    # concatenated project tree (multi-file mode), where each file is preceded by a
+    # `--- relative/path ---` header line. We detect that shape and label the payload
+    # accordingly so the model understands what it's looking at and can reference files by
+    # name in its reply.
+    is_multi_file = "\n--- " in snippet and " ---\n" in snippet
+    if is_multi_file:
+        user_content = (
+            f"My current project ({language}). Each file is preceded by a "
+            "`--- relative/path ---` header. Treat them as one project so you can answer "
+            "questions about how files relate.\n\n"
+            f"{snippet}\n\n"
+            f"Question: {query}"
+        )
+    else:
+        user_content = (
+            f"My current {language} code:\n```{language}\n{snippet}\n```\n\n"
+            f"Question: {query}"
+        )
     messages.append(HumanMessage(content=user_content))
 
     state = await _get_graph().ainvoke({"messages": messages})

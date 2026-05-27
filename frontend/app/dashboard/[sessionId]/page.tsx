@@ -10,9 +10,10 @@ import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
 import ParticipantsPopover, { type Participant } from "@/components/Dashboard/ParticipantsPopover";
 import SummaryView from "@/components/Dashboard/SummaryView";
 import DisplayNameModal from "@/components/DisplayNameModal";
+import MultiFileEditor, { type MultiFile } from "@/components/Editor/MultiFileEditor";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
-import type { Scorecard } from "@/lib/types";
+import type { EventRow, Scorecard } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
 function nameConfirmedKey(sessionId: string): string {
@@ -35,6 +36,15 @@ export default function InterviewerSessionPage() {
   const [status, setStatus] = useState("connecting");
   const [pushback, setPushback] = useState<string[]>([]);
   const [pasteCount, setPasteCount] = useState(0);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [tabHidden, setTabHidden] = useState(false);
+  const [remoteCursor, setRemoteCursor] = useState<{ line: number; column: number } | null>(null);
+  const [files, setFiles] = useState<MultiFile[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const [hasFiles, setHasFiles] = useState(false);
+  const [shellHistory, setShellHistory] = useState<
+    { command: string; stdout: string; stderr: string }[]
+  >([]);
   const [lastRun, setLastRun] = useState<{ passed: number; total: number } | null>(null);
   const [budget, setBudget] = useState<{ used: number; budget: number; remaining: number } | null>(
     null,
@@ -46,10 +56,13 @@ export default function InterviewerSessionPage() {
   const [defaultName, setDefaultName] = useState("");
   const [ended, setEnded] = useState(false);
   const [transcripts, setTranscripts] = useState<ChatMessage[] | null>(null);
+  const [summaryEvents, setSummaryEvents] = useState<EventRow[]>([]);
   const [scorecardLoading, setScorecardLoading] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const [aiModel, setAiModel] = useState<string>("");
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
+  const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
   const [title, setTitle] = useState<string>("");
   const [createdAt, setCreatedAt] = useState<string>("");
@@ -70,6 +83,7 @@ export default function InterviewerSessionPage() {
           was_hallucinated: t.was_hallucinated,
         })),
       );
+      setSummaryEvents(events);
       const codeChanges = events.filter(
         (e) => e.type === "code_change" && typeof e.payload.code === "string",
       );
@@ -122,6 +136,9 @@ export default function InterviewerSessionPage() {
         if ("ended_at" in interview) setEndedAt(interview.ended_at);
         if ("ai_model" in interview) setAiModel(interview.ai_model);
         if ("guardrail_preset" in interview) setGuardrailPreset(interview.guardrail_preset);
+        if ("guardrail_presets" in interview && Array.isArray(interview.guardrail_presets)) {
+          setGuardrailPresets(interview.guardrail_presets);
+        }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
         if ("status" in interview && interview.status === "ended") {
           setEnded(true);
@@ -129,6 +146,18 @@ export default function InterviewerSessionPage() {
           // name isn't needed. Skip the modal entirely; data loads directly.
           setNameReady(true);
           void loadSummary();
+        }
+      } catch {
+        // non-fatal
+      }
+      try {
+        const list = await api.listFiles(sessionId);
+        if (!active) return;
+        if (list.length > 0) {
+          setFiles(list);
+          setHasFiles(true);
+          const firstFile = list.find((f) => !f.is_folder);
+          if (firstFile) setActivePath(firstFile.path);
         }
       } catch {
         // non-fatal
@@ -168,6 +197,44 @@ export default function InterviewerSessionPage() {
         setLastRun(e.payload as { passed: number; total: number });
       } else if (e.type === "paste_flag") {
         setPasteCount((c) => c + 1);
+      } else if (e.type === "tab_switch") {
+        const p = e.payload as { hidden: boolean };
+        setTabHidden(p.hidden);
+        if (p.hidden) setTabSwitchCount((c) => c + 1);
+      } else if (e.type === "cursor_move") {
+        const p = e.payload as { line: number; column: number };
+        setRemoteCursor({ line: p.line, column: p.column });
+      } else if (e.type === "file_change") {
+        const p = e.payload as { path: string; content: string };
+        setFiles((prev) =>
+          prev.map((f) => (f.path === p.path ? { ...f, content: p.content } : f)),
+        );
+      } else if (e.type === "files_dirty") {
+        // Structural change (create / rename / delete) by the candidate. Re-fetch the tree.
+        // file_change handles content edits already, so this only fires on tree shape changes.
+        api
+          .listFiles(sessionId)
+          .then((list) => {
+            setFiles(list);
+            // Flip to multi-file mode the moment the candidate adds the first file. Active
+            // path stays whatever the interviewer was looking at unless it disappeared.
+            if (list.length > 0) setHasFiles(true);
+            setActivePath((cur) => {
+              if (cur && list.some((f) => f.path === cur && !f.is_folder)) return cur;
+              const firstFile = list.find((f) => !f.is_folder);
+              return firstFile ? firstFile.path : null;
+            });
+          })
+          .catch(() => undefined);
+      } else if (e.type === "file_select") {
+        const p = e.payload as { path: string };
+        setActivePath(p.path);
+      } else if (e.type === "shell_output") {
+        const p = e.payload as { command: string; stdout: string; stderr: string };
+        setShellHistory((h) => [
+          ...h,
+          { command: p.command, stdout: p.stdout, stderr: p.stderr },
+        ]);
       } else if (e.type === "pushback") {
         setPushback((e.payload as { questions: string[] }).questions);
       } else if (e.type === "token_budget") {
@@ -210,8 +277,13 @@ export default function InterviewerSessionPage() {
     setNameReady(true);
   }
 
-  function endInterview() {
+  function requestEndInterview() {
+    setEndConfirmOpen(true);
+  }
+
+  function confirmEndInterview() {
     socketRef.current?.send("interview_end", {});
+    setEndConfirmOpen(false);
   }
 
   function admit(profileId: string) {
@@ -246,6 +318,7 @@ export default function InterviewerSessionPage() {
         lastRun={lastRun}
         scorecard={scorecard}
         scorecardLoading={scorecardLoading}
+        events={summaryEvents}
       />
     );
   }
@@ -271,6 +344,13 @@ export default function InterviewerSessionPage() {
             ⚠ {pasteCount} large paste(s)
           </span>
         )}
+        {tabSwitchCount > 0 && (
+          <span
+            className={`text-xs font-semibold ${tabHidden ? "text-red-400" : "text-amber-400"}`}
+          >
+            {tabHidden ? "🔴 candidate is on another tab" : `⚠ ${tabSwitchCount} tab switch(es)`}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <ParticipantsPopover
             participants={participants}
@@ -280,7 +360,7 @@ export default function InterviewerSessionPage() {
           />
           <button
             type="button"
-            onClick={endInterview}
+            onClick={requestEndInterview}
             className="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white"
           >
             End interview
@@ -305,26 +385,31 @@ export default function InterviewerSessionPage() {
             <PanelGroup direction="vertical" autoSaveId="interview-interviewer-v">
               <Panel defaultSize={70} minSize={20}>
                 <div className="h-full">
-                  <CodeEditor value={code} language={language} readOnly />
+                  {hasFiles ? (
+                    <MultiFileEditor
+                      files={files}
+                      fallbackLanguage={language}
+                      activePath={activePath}
+                      onActivePathChange={setActivePath}
+                      remoteCursor={remoteCursor}
+                      readOnly
+                    />
+                  ) : (
+                    <CodeEditor
+                      value={code}
+                      language={language}
+                      readOnly
+                      remoteCursor={remoteCursor}
+                    />
+                  )}
                 </div>
               </Panel>
               <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
               <Panel defaultSize={30} minSize={8} collapsible collapsedSize={4}>
-                <div className="flex h-full flex-col border-t border-neutral-800 bg-black">
-                  <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                    <span>Terminal (candidate runs)</span>
-                    {lastRun && (
-                      <span className="text-neutral-500">
-                        last {lastRun.passed}/{lastRun.total}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 overflow-auto p-2 font-mono text-xs text-neutral-500">
-                    {lastRun
-                      ? `Candidate's last run: ${lastRun.passed}/${lastRun.total} tests passed.`
-                      : "Waiting for the candidate to click Run…"}
-                  </div>
-                </div>
+                <InterviewerTerminalMirror
+                  lastRun={lastRun}
+                  shellHistory={shellHistory}
+                />
               </Panel>
             </PanelGroup>
           </Panel>
@@ -338,6 +423,7 @@ export default function InterviewerSessionPage() {
                 <AIInfoHeader
                   model={aiModel}
                   guardrailPreset={guardrailPreset}
+                  guardrailPresets={guardrailPresets}
                   hallucinationPct={hallucinationPct}
                 />
               )}
@@ -360,6 +446,95 @@ export default function InterviewerSessionPage() {
           </Panel>
         </PanelGroup>
       </div>
+      {endConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-950 p-5 shadow-xl">
+            <h2 className="text-lg font-semibold">End this interview?</h2>
+            <p className="mt-2 text-sm text-neutral-400">
+              This will close the session for the candidate immediately and start generating the
+              scorecard. You cannot reopen it.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEndConfirmOpen(false)}
+                className="rounded border border-neutral-700 px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmEndInterview}
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white"
+              >
+                Yes, end interview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+// Read-only mirror of the candidate's terminal panel for the interviewer dashboard. Shows the
+// candidate's last Run result + every shell command they typed during the session, so the
+// interviewer can see what they ran without needing the candidate to narrate it.
+function InterviewerTerminalMirror({
+  lastRun,
+  shellHistory,
+}: {
+  lastRun: { passed: number; total: number } | null;
+  shellHistory: { command: string; stdout: string; stderr: string }[];
+}) {
+  const [tab, setTab] = useState<"run" | "shell">("run");
+  return (
+    <div className="flex h-full flex-col border-t border-neutral-800 bg-black">
+      <div className="flex items-center border-b border-neutral-800 px-2 text-xs font-semibold uppercase tracking-wider">
+        <button
+          type="button"
+          onClick={() => setTab("run")}
+          className={`px-3 py-1.5 ${tab === "run" ? "border-b-2 border-emerald-500 text-emerald-300" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          Runs
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("shell")}
+          className={`px-3 py-1.5 ${tab === "shell" ? "border-b-2 border-sky-400 text-sky-300" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          Shell ({shellHistory.length})
+        </button>
+        <span className="ml-auto py-1.5 text-neutral-500">
+          {tab === "run" && lastRun ? `last ${lastRun.passed}/${lastRun.total}` : ""}
+        </span>
+      </div>
+      <div className="flex-1 overflow-auto p-2 font-mono text-xs">
+        {tab === "run" && (
+          <span className="text-neutral-500">
+            {lastRun
+              ? `Candidate's last run: ${lastRun.passed}/${lastRun.total} tests passed.`
+              : "Waiting for the candidate to click Run…"}
+          </span>
+        )}
+        {tab === "shell" && shellHistory.length === 0 && (
+          <span className="text-neutral-600">Candidate hasn&apos;t used the shell yet.</span>
+        )}
+        {tab === "shell" &&
+          shellHistory.map((entry, i) => (
+            <div key={i} className="mb-2">
+              <div className="text-neutral-400">
+                <span className="text-sky-400">$</span> {entry.command}
+              </div>
+              {entry.stdout && (
+                <pre className="whitespace-pre-wrap text-neutral-200">{entry.stdout}</pre>
+              )}
+              {entry.stderr && (
+                <pre className="whitespace-pre-wrap text-red-400">{entry.stderr}</pre>
+              )}
+            </div>
+          ))}
+      </div>
+    </div>
   );
 }

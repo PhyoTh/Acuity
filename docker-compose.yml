@@ -19,7 +19,7 @@ services:
       POSTGRES_PASSWORD: devlens
       POSTGRES_DB: devlens
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - devlens_pgdata:/var/lib/postgresql/data
     healthcheck:
