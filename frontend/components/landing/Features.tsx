@@ -98,8 +98,8 @@ export function Features() {
         <FeatureCard
           tag="share"
           accent="var(--live)"
-          title="One link. Zero install."
-          body="Send candidates a single URL. They land in a real Monaco editor — no setup, no plugins, no zoom dance."
+          title="One link. No webcam. No install."
+          body="Send candidates a single URL — they create a free account in 10 seconds, then land in a real Monaco editor. No browser plugins, no screen-recording permission, no microphone. Just the code, the chat, and the moments that matter."
           span={2}
           decoration={<ShareLink />}
         />
@@ -112,12 +112,12 @@ export function Features() {
           decoration={<Calendar />}
         />
         <FeatureCard
-          tag="privacy"
+          tag="guardrails"
           accent="var(--signal)"
-          title="Privacy by default."
-          body="No webcam, no microphone, no screen recording. Just the code, the chat, and the moments that matter — explicitly logged and visible to both sides."
+          title="Stack guardrails. Or write your own."
+          body="Pick from five built-in policies — hints only, no full solutions, explain don't write, syntax only, open — and stack as many as you want. Custom presets and free-form rules let you shape the AI's behavior to match how your team actually interviews."
           span={2}
-          decoration={<PrivacyMatrix />}
+          decoration={<GuardrailStack />}
         />
         <FeatureCard
           tag="cost"
@@ -311,49 +311,46 @@ function Calendar() {
   );
 }
 
-function PrivacyMatrix() {
-  const rows: { label: string; cand: "y" | "n" | "-"; intv: "y" | "n" | "-" }[] = [
-    { label: "Code & chat",       cand: "y", intv: "y" },
-    { label: "Webcam / mic",      cand: "n", intv: "n" },
-    { label: "Screen recording",  cand: "n", intv: "n" },
-    { label: "Halluc flags",      cand: "-", intv: "y" },
+// Visual stack of guardrail presets. The four built-ins are shown as active; the
+// "+ custom rule" row is shown as an open slot for the interviewer's own policy.
+function GuardrailStack() {
+  const rows: { label: string; tone: "live" | "signal" | "warn" | "muted"; active: boolean }[] = [
+    { label: "hints_only",       tone: "live",   active: true  },
+    { label: "no_full_solutions", tone: "signal", active: true  },
+    { label: "syntax_only",      tone: "warn",   active: true  },
+    { label: "+ custom rule",    tone: "muted",  active: false },
   ];
-  const cell = (v: "y" | "n" | "-") =>
-    v === "y" ? <Icon name="check" size={14} color="var(--live)" />
-    : v === "n" ? <Icon name="x" size={14} color="var(--bad)" />
-    : <span className="mono" style={{ color: "var(--fg-3)" }}>—</span>;
+  const dim = (t: "live" | "signal" | "warn" | "muted") => `var(--${t})`;
   return (
-    <div style={{ background: "var(--bg-2)", border: "1px solid var(--line-1)", borderRadius: 6 }}>
-      <div
-        className="grid mono"
-        style={{
-          gridTemplateColumns: "1fr 40px 40px",
-          padding: "6px 12px",
-          fontSize: 10,
-          color: "var(--fg-3)",
-          letterSpacing: "0.06em",
-          borderBottom: "1px solid var(--line-1)",
-        }}
-      >
-        <span></span><span className="text-center">CAND</span><span className="text-center">INTV</span>
+    <div style={{ background: "var(--bg-2)", border: "1px solid var(--line-1)", borderRadius: 6, padding: 8 }}>
+      <div className="flex flex-col gap-1.5">
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            className="mono flex items-center gap-2"
+            style={{
+              padding: "6px 10px",
+              borderRadius: 4,
+              background: r.active
+                ? `color-mix(in oklch, ${dim(r.tone)} 14%, transparent)`
+                : "transparent",
+              border: `1px ${r.active ? "solid" : "dashed"} ${r.active ? dim(r.tone) : "var(--line-2)"}`,
+              fontSize: 11,
+              color: r.active ? dim(r.tone) : "var(--fg-3)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            <span
+              style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: r.active ? dim(r.tone) : "transparent",
+                border: r.active ? "none" : `1px dashed var(--fg-3)`,
+              }}
+            />
+            {r.label}
+          </div>
+        ))}
       </div>
-      {rows.map((r, i) => (
-        <div
-          key={r.label}
-          className="grid items-center"
-          style={{
-            gridTemplateColumns: "1fr 40px 40px",
-            padding: "8px 12px",
-            fontSize: 12,
-            color: "var(--fg-1)",
-            borderBottom: i === rows.length - 1 ? "none" : "1px solid var(--line-1)",
-          }}
-        >
-          <span>{r.label}</span>
-          <span className="flex justify-center">{cell(r.cand)}</span>
-          <span className="flex justify-center">{cell(r.intv)}</span>
-        </div>
-      ))}
     </div>
   );
 }

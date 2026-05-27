@@ -35,6 +35,23 @@ export const STATS = {
   tokensSpent:      { value: "84.2K", sub: "$0.32 est.",              spark: [8, 12, 10, 18, 22, 28, 32, 42, 48, 56, 64, 72, 84] },
 };
 
+// Per-interviewer + shared-team Anthropic usage. Both are mock per plan.md §9b — we
+// don't aggregate usage by user yet, and there is no Anthropic billing API integration.
+export const TOKENS_MINE = {
+  value: "12.4K",
+  sub: "$0.05 est. this week",
+  spark: [1, 2, 1, 3, 2, 4, 3, 5, 4, 6, 7, 9, 12],
+};
+
+export const API_BALANCE = {
+  used: 18.42,
+  total: 25.0,
+  // Mock: pretend the team has $25 of monthly Anthropic budget and we've burned ~$18.
+  spentLabel: "$18.42",
+  totalLabel: "$25.00",
+  remainingLabel: "$6.58 remaining",
+};
+
 export const ACTIVITY = [
   { who: "Sithu Soe",   what: "joined",    target: "Search infra — onsite #2",   when: "2m",  color: "live"   },
   { who: "Phyo Thant",  what: "scheduled", target: "Stripe payment flow",        when: "32m", color: "signal" },

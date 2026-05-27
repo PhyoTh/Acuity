@@ -247,7 +247,6 @@ export default function CreateSessionForm({
             <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
               {INTERVIEW_TYPES.map((t) => {
                 const selected = t.value === form.interview_type;
-                const isSig = t.value === "debugging";
                 return (
                   <button
                     key={t.value}
@@ -263,11 +262,8 @@ export default function CreateSessionForm({
                       transition: "all 0.12s ease",
                     }}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div style={{ fontSize: 14, color: "var(--fg-0)", fontWeight: 600 }}>
-                        {t.label}
-                      </div>
-                      {isSig && <Pill kind="warn">★ signature</Pill>}
+                    <div style={{ fontSize: 14, color: "var(--fg-0)", fontWeight: 600 }}>
+                      {t.label}
                     </div>
                     <div className="mt-1" style={{ fontSize: 12.5, color: "var(--fg-2)", lineHeight: 1.45 }}>
                       {t.description}

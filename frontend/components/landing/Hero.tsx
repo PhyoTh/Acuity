@@ -101,6 +101,7 @@ export function Hero() {
         {/* RIGHT — live hallucination demo card */}
         <div
           style={{
+            position: "relative",
             background: "var(--bg-1)",
             border: "1px solid var(--line-1)",
             borderRadius: 12,
@@ -109,6 +110,30 @@ export function Hero() {
             overflow: "hidden",
           }}
         >
+          {/* Drag-to-change hint — absolutely positioned just below the slider so its ↑
+              arrow actually points at the thing it's telling you to drag. */}
+          {!hasDragged && (
+            <div
+              className="anim-bounce-y"
+              style={{
+                position: "absolute",
+                top: 52,
+                right: 18,
+                zIndex: 2,
+                padding: "3px 10px",
+                borderRadius: 999,
+                border: "1px dashed var(--warn)",
+                background: "var(--warn-dim)",
+                fontSize: 11,
+                color: "var(--warn)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              ↑ drag to change
+            </div>
+          )}
           {/* Header */}
           <div
             className="flex items-center justify-between"
@@ -248,43 +273,13 @@ export function Hero() {
               </div>
             </div>
 
-            {/* Educational hints (auto-dismissed on interaction) */}
-            {!hasDragged && (
-              <div
-                className="mono anim-bounce-y"
-                style={{
-                  alignSelf: "flex-end",
-                  marginTop: -8,
-                  marginRight: 4,
-                  fontSize: 11,
-                  color: "var(--warn)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}
-              >
-                ↑ drag to change
-              </div>
-            )}
+            {/* Hover-the-spans hint — auto-dismisses once the user hovers any corrupted
+                span. The drag hint lives in the absolutely-positioned overlay above so it
+                can point directly at the slider. */}
             {isCorrupted && !hasHovered && (
-              <div
-                className="anim-fade-pulse"
-                style={{
-                  alignSelf: "flex-start",
-                  marginTop: -8,
-                  marginLeft: 40,
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  border: "1px dashed var(--warn)",
-                  background: "var(--warn-dim)",
-                  fontSize: 11,
-                  color: "var(--warn)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.04em",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
+              <HintPill align="start" animation="pulse" indent={40}>
                 ↑ hover the underlined spans
-              </div>
+              </HintPill>
             )}
           </div>
 
@@ -382,6 +377,41 @@ function HalluSpan({
         </span>
       )}
     </span>
+  );
+}
+
+function HintPill({
+  children,
+  align,
+  animation,
+  indent = 0,
+}: {
+  children: React.ReactNode;
+  align: "start" | "end";
+  animation: "bounce" | "pulse";
+  indent?: number;
+}) {
+  return (
+    <div
+      className={animation === "bounce" ? "anim-bounce-y" : "anim-fade-pulse"}
+      style={{
+        alignSelf: align === "end" ? "flex-end" : "flex-start",
+        marginTop: -8,
+        marginLeft: align === "start" ? indent : undefined,
+        marginRight: align === "end" ? 4 : undefined,
+        padding: "3px 10px",
+        borderRadius: 999,
+        border: "1px dashed var(--warn)",
+        background: "var(--warn-dim)",
+        fontSize: 11,
+        color: "var(--warn)",
+        textTransform: "uppercase",
+        letterSpacing: "0.04em",
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

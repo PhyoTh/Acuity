@@ -324,19 +324,21 @@ rendered as **mock UI per the roadmap** but not wired to live data. Document/imp
 
 | Item | Where it appears | Status |
 |---|---|---|
-| Dashboard stats: "Sessions this week / Avg. caught AI errors / Median scorecard / Tokens spent" | `/dashboard` 4-stat row | Mock data via `lib/mocks.ts` |
-| Sparkline series on each stat | dashboard stat tiles | Mock |
+| "Your tokens" tile (per-user Anthropic spend) | `/dashboard` header row | Mock — backend doesn't aggregate usage per `created_by` yet; would need a SUM over `transcripts.tokens` joined to sessions for the current user |
+| "API balance" tile (shared team Anthropic balance) | `/dashboard` header row | Mock — Anthropic does not expose a real-time balance API, and we don't yet track Team accounting. Would require a manually-set monthly budget + cumulative spend cron |
+| Schedule calendar with scheduled-day click popovers | `/dashboard` header row | Real `pending` sessions are bucketed by `created_at` (no `scheduled_at` column yet). Popover lists sessions for that day. True scheduling = new column + UI in the wizard. |
+| Sparkline series on each stat | dashboard usage tiles | Mock |
 | "Recent activity" feed | `/dashboard` right column | Mock |
-| Quick-start preset buttons | `/dashboard` right column | Mock — buttons should still route to `/dashboard/new`, no preset preload yet |
-| Scheduled sessions (`pending` status + scheduled-time copy on the dashboard) | sessions table, `Calendar` feature card | No DB column for scheduled-time; session.status already supports `pending` but is never set on create |
+| Quick-start preset buttons | `/dashboard` right column | Mock — buttons route to `/dashboard/new` but don't preload the type |
+| Scheduled sessions (proper `scheduled_at` + cron-released invite) | wizard, sessions table, landing Features card | No DB column yet; `pending` status is set by the backend but never carries a planned start time |
 | Calendar / "Schedule ahead" feature card | landing Features bento | Pure decoration |
 | Cost footprint card ("$0.32 / session") | landing Features bento, landing hero footer copy | Pure decoration |
-| Privacy matrix card | landing Features bento | Pure decoration |
 | Mission-control mini-dashboard card | landing Features bento | Pure decoration |
 | Score callout card | landing Features bento | Pure decoration |
 | Integrity timeline card | landing Features bento | Pure decoration (the actual replay timeline on the summary page IS wired) |
 | Share-link decoration (acuity.app/join/...) | landing Features bento | Pure decoration |
-| Anthropic key card on the dashboard sidebar | `/dashboard` sidebar footer | UI only — the key is server-side env-driven; we do NOT yet support BYO keys per user |
+| "Stack guardrails / write your own" feature card | landing Features bento | Stacking is real; **custom user-defined guardrail presets are not yet implemented** — see §9c |
+| Anthropic key shown in the sidebar | `/dashboard` sidebar footer | Was a static card; moving to a Settings panel (see §9c). Real keys are still env-driven; no per-user BYO yet |
 | "Export PDF" button on the summary | summary top-right | Not wired |
 | "Share read-only link" button on the summary | summary top-right | Not wired |
 | Radar chart on the summary | summary Profile card | Rendered from the existing `scorecard.scores` 4-dim numbers, no new backend |
@@ -345,3 +347,29 @@ rendered as **mock UI per the roadmap** but not wired to live data. Document/imp
 | Hero "demo card" hallucination injector slider | landing hero | Client-only mock — uses canned segments, no backend call |
 | Contact form submission | landing `#contact` | Client-only — shows success state, no email is actually sent |
 | "Acuity is free — bring your own Anthropic key" messaging | landing hero, Features bento | Aspirational — actual product is single shared key today |
+
+### 9c. Backlog (features promised by the UI, awaiting backend)
+
+The redesign promises three features that we explicitly want but haven't built yet.
+Tracking here so the next pass doesn't lose them:
+
+- **Custom guardrail presets** — `INTERVIEW_TYPES` is a fixed list and `GUARDRAIL_PRESETS`
+  is a 5-element enum. Plan: add a `guardrail_library` table (user-scoped or team-scoped)
+  storing name + free-text policy; the wizard reads from `[…built-ins, …custom]`. The
+  landing's "Stack guardrails. Or write your own." feature card and the Settings panel
+  (§9d) both assume this exists. For now `guardrail_custom` (the per-session free-text
+  field) is the workaround.
+- **Per-user Anthropic key (BYO)** — landing hero copy and Features bento promise it.
+  Backend: add `profiles.anthropic_api_key` (encrypted) + fallback to env if unset, and
+  have `services/llm.py` resolve the right key per request. Settings panel (§9d) hosts
+  the input.
+- **Session scheduling (`scheduled_at`)** — required to make the dashboard calendar
+  honest. Adds a column + a job that flips `pending → active` at the scheduled time and
+  emails the candidate.
+
+### 9d. Settings panel (planned)
+
+`/dashboard` will get a new "Settings" nav item replacing the current Anthropic-key card
+in the sidebar footer. The panel hosts the per-user API key (with a reveal toggle),
+display name, and other team / notification preferences. Exact contents are being
+finalized with the team — keep this section updated once the question is answered.

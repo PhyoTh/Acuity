@@ -2,22 +2,23 @@ import Link from "next/link";
 import { Avatar, Icon, SectionLabel, Wordmark } from "@/components/ui";
 
 type SidebarNavItem = {
+  key: string;
   label: string;
   href: string;
-  icon: "menu" | "clock" | "code" | "users" | "sparkle";
-  active?: boolean;
+  icon: "menu" | "clock" | "code" | "users" | "sparkle" | "settings";
 };
 
 const NAV: SidebarNavItem[] = [
-  { label: "Sessions",        href: "/dashboard",          icon: "menu",    active: true },
-  { label: "Activity",        href: "#activity",            icon: "clock" },
-  { label: "Problem library", href: "#problem-library",     icon: "code" },
-  { label: "Candidates",      href: "#candidates",          icon: "users" },
-  { label: "Scorecards",      href: "#scorecards",          icon: "sparkle" },
+  { key: "sessions",  label: "Sessions",        href: "/dashboard",          icon: "menu" },
+  { key: "activity",  label: "Activity",        href: "#activity",            icon: "clock" },
+  { key: "library",   label: "Problem library", href: "#problem-library",     icon: "code" },
+  { key: "candidates",label: "Candidates",      href: "#candidates",          icon: "users" },
+  { key: "scorecards",label: "Scorecards",      href: "#scorecards",          icon: "sparkle" },
+  { key: "settings",  label: "Settings",        href: "/dashboard/settings",  icon: "settings" },
 ];
 
-// Sticky 240px sidebar for the interviewer dashboard. Tabs other than
-// "Sessions" are decorative — no backend yet (see plan.md §9b).
+// Sticky 240px sidebar for the interviewer dashboard. Tabs other than "Sessions" and
+// "Settings" are decorative — no backend yet (see plan.md §9b).
 export function DashboardSidebar({ activeKey = "sessions" }: { activeKey?: string }) {
   return (
     <aside
@@ -32,16 +33,18 @@ export function DashboardSidebar({ activeKey = "sessions" }: { activeKey?: strin
         padding: "20px 16px",
       }}
     >
+      {/* Wordmark is intentionally non-clickable here — interviewers shouldn't accidentally
+          leave their authenticated dashboard for the public landing page. */}
       <div style={{ padding: "0 8px 16px" }}>
-        <Link href="/"><Wordmark size={16} /></Link>
+        <Wordmark size={16} />
       </div>
 
       <nav className="flex flex-col" style={{ gap: 2 }}>
         {NAV.map((n) => {
-          const isActive = activeKey === n.label.toLowerCase().split(" ")[0] || n.active;
+          const isActive = activeKey === n.key;
           return (
             <Link
-              key={n.label}
+              key={n.key}
               href={n.href}
               className="flex items-center gap-2.5"
               style={{
@@ -52,6 +55,7 @@ export function DashboardSidebar({ activeKey = "sessions" }: { activeKey?: strin
                 background: isActive ? "var(--bg-2)" : "transparent",
                 boxShadow: isActive ? "inset 2px 0 0 var(--live)" : "none",
                 position: "relative",
+                textDecoration: "none",
               }}
             >
               <Icon name={n.icon} size={14} color={isActive ? "var(--live)" : "var(--fg-2)"} />
@@ -70,26 +74,6 @@ export function DashboardSidebar({ activeKey = "sessions" }: { activeKey?: strin
               <span>{n}</span>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* Anthropic key card — mock display per ROADMAP §3.3. Real keys are env-driven. */}
-      <div
-        className="mt-auto"
-        style={{
-          background: "var(--bg-1)",
-          border: "1px solid var(--line-1)",
-          borderRadius: "var(--radius)",
-          padding: 12,
-        }}
-      >
-        <SectionLabel>Anthropic key</SectionLabel>
-        <div className="mono mt-2" style={{ color: "var(--fg-1)", fontSize: 12 }}>
-          sk-ant-…7c2a
-        </div>
-        <div className="mono mt-2 flex items-center gap-1.5" style={{ fontSize: 10, color: "var(--fg-2)", letterSpacing: "0.04em" }}>
-          <span className="live-pulse-dot" style={{ width: 5, height: 5 }} />
-          connected · haiku-4-5
         </div>
       </div>
     </aside>

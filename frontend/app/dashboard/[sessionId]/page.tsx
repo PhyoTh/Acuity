@@ -353,7 +353,7 @@ export default function InterviewerSessionPage() {
           <Icon name="chevron-left" size={14} /> Back
         </Link>
         <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
-        <Link href="/"><Wordmark size={14} /></Link>
+        <Wordmark size={14} />
         <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
         <Pill kind={statusKind} pulse={status === "live"}>
           {status === "live" ? `live · ${formatElapsed(elapsed)}` : status}

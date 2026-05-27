@@ -69,7 +69,7 @@ export default function LoginPage() {
             className="input"
             type="email"
             required
-            placeholder="phyo@ucsd.edu"
+            placeholder="you@company.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
