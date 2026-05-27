@@ -53,9 +53,24 @@ _BASE_SYSTEM = (
 )
 
 
-def build_guardrail_system(preset: str, custom: str) -> str:
-    """Compose the agent's system prompt from a preset + optional free-text override."""
-    parts = [_BASE_SYSTEM, GUARDRAIL_PRESETS.get(preset, GUARDRAIL_PRESETS["hints_only"])]
+def build_guardrail_system(preset: str | list[str], custom: str) -> str:
+    """Compose the agent's system prompt from one or more presets + optional free-text override.
+
+    Accepts either a single preset string (legacy) or a list of preset names (multi-select). When
+    multiple presets are stacked the strictest constraints naturally compose because each preset
+    is appended as a separate "Guardrail:" clause that Claude must obey simultaneously.
+    """
+    if isinstance(preset, str):
+        presets = [preset]
+    else:
+        presets = list(preset) if preset else []
+    if not presets:
+        presets = ["hints_only"]
+    parts = [_BASE_SYSTEM]
+    for p in presets:
+        text = GUARDRAIL_PRESETS.get(p)
+        if text:
+            parts.append(text)
     if custom.strip():
         parts.append(f"Additional interviewer instructions: {custom.strip()}")
     return "\n\n".join(parts)

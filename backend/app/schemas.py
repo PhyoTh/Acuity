@@ -74,9 +74,21 @@ INTERVIEW_TYPES: dict[str, dict[str, Any]] = {
 
 
 class TestCase(BaseModel):
+    """One executable test.
+
+    Two modes are supported:
+    - **stdin** mode (default): the candidate's program is run as-is; `stdin` is piped to it and
+      stdout is compared against `expected`. Suitable for I/O problems (read input, print answer).
+    - **call** mode: when `call` is non-empty, the runner appends a small harness that evaluates
+      that expression (after the candidate's code) and prints its result. This is what makes
+      LeetCode-style problems work — the candidate pastes a `class Solution: def twoSum(...)`
+      and the test sets `call="Solution().twoSum([2,7,11,15], 9)"` + `expected="[0, 1]"`.
+    """
+
     stdin: str = ""
     expected: str = ""
     hidden: bool = False
+    call: str = ""
 
 
 class ProfileOut(BaseModel):
@@ -128,7 +140,11 @@ class SessionCreate(BaseModel):
     interview_type: str = Field(default="algorithm", max_length=40)
     prompt: str = ""
     starting_code: str = ""
+    # Singular `guardrail_preset` is kept for backward compat with existing clients; new clients
+    # should send `guardrail_presets` (a list) and the server stacks them. If only the singular
+    # one is sent, the server normalizes to a single-element list.
     guardrail_preset: str = Field(default="hints_only")
+    guardrail_presets: list[str] = Field(default_factory=list)
     guardrail_custom: str = ""
     hallucination_pct: int = Field(default=0, ge=0, le=100)
     test_cases: list[TestCase] = Field(default_factory=list)
@@ -150,6 +166,7 @@ class SessionOut(BaseModel):
     prompt: str
     starting_code: str
     guardrail_preset: str
+    guardrail_presets: list[str] = Field(default_factory=list)
     guardrail_custom: str
     hallucination_pct: int
     test_cases: list[TestCase]
@@ -179,6 +196,7 @@ class SessionCandidateView(BaseModel):
     token_budget: int
     status: SessionStatus
     guardrail_preset: str = ""
+    guardrail_presets: list[str] = Field(default_factory=list)
     hallucination_pct: int = 0
     ai_model: str = ""
 
@@ -215,8 +233,33 @@ class ScorecardOut(BaseModel):
     created_at: datetime
 
 
+class SessionFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    path: str
+    content: str
+    is_folder: bool
+    updated_at: datetime
+
+
+class SessionFileCreate(BaseModel):
+    path: str = Field(min_length=1, max_length=512)
+    content: str = ""
+    is_folder: bool = False
+
+
+class SessionFileUpdate(BaseModel):
+    # PATCH payload: any subset can be sent. `path` triggers a rename.
+    path: str | None = Field(default=None, max_length=512)
+    content: str | None = None
+
+
 class RunRequest(BaseModel):
-    code: str
+    # Legacy single-file mode: when the session has no files in `session_files`, the candidate
+    # sends their working code here and we run that. With files, the server runs the file tree
+    # and ignores this field.
+    code: str = ""
 
 
 class TestResult(BaseModel):

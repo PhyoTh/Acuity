@@ -16,7 +16,15 @@ export type SessionEventType =
   | "participants" // server -> session: current participant list (with admit state)
   | "admit" // interviewer -> server: admit a waiting candidate
   | "kick" // interviewer -> server: remove a participant
-  | "kicked"; // server -> session: participant was removed (target self-closes)
+  | "kicked" // server -> session: participant was removed (target self-closes)
+  | "tab_switch" // candidate -> server -> interviewer: visibilitychange (hidden/visible)
+  | "cursor_move" // candidate -> server -> interviewer: monaco cursor position
+  | "mouse_move" // candidate -> server: heartbeat for idle detection (not broadcast live)
+  | "file_change" // candidate -> server -> interviewer: multi-file edit (path, content)
+  | "file_select" // candidate -> server -> interviewer: switched active file
+  | "files_dirty" // server -> session: structural change (create/rename/delete) — refetch list
+  | "shell_command" // candidate -> server: typed a shell command in the terminal
+  | "shell_output"; // server -> session: command + stdout/stderr/exit for the terminal
 
 export interface SessionEvent<T = Record<string, unknown>> {
   type: SessionEventType;

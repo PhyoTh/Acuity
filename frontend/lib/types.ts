@@ -83,6 +83,12 @@ export interface TestCaseInput {
   stdin: string;
   expected: string;
   hidden: boolean;
+  // When non-empty, the runner appends a per-language harness that evaluates `call` after the
+  // candidate's code and prints the result. This is what makes LeetCode-style problems work:
+  // candidate pastes `class Solution: def twoSum(...)` and the test sets
+  // `call="Solution().twoSum([2,7,11,15], 9)"` + `expected="[0, 1]"`. Supported for Python and
+  // JS/TS; ignored for compiled languages.
+  call?: string;
 }
 
 export interface TestResult {
@@ -127,6 +133,7 @@ export interface SessionConfig {
   prompt: string;
   starting_code: string;
   guardrail_preset: string;
+  guardrail_presets: string[];
   guardrail_custom: string;
   hallucination_pct: number;
   test_cases: TestCaseInput[];
@@ -148,6 +155,7 @@ export interface SessionCandidateView {
   token_budget: number;
   status: SessionStatus;
   guardrail_preset: string;
+  guardrail_presets: string[];
   hallucination_pct: number;
   ai_model: string;
 }
@@ -170,6 +178,14 @@ export interface CandidateSessionLog {
   status: SessionStatus;
   created_at: string;
   ended_at: string | null;
+}
+
+export interface SessionFile {
+  id: string;
+  path: string;
+  content: string;
+  is_folder: boolean;
+  updated_at: string;
 }
 
 export interface TranscriptTurn {
@@ -195,6 +211,7 @@ export interface SessionCreateInput {
   prompt: string;
   starting_code: string;
   guardrail_preset: string;
+  guardrail_presets: string[];
   guardrail_custom: string;
   hallucination_pct: number;
   test_cases: TestCaseInput[];

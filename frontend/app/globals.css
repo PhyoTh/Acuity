@@ -7,3 +7,70 @@
 body {
   @apply bg-neutral-950 text-neutral-100 antialiased;
 }
+
+/* Markdown rendering for AI chat replies. Bold/italics/lists/code-fences get real formatting
+   instead of leaking literal *bold* / `code` characters. */
+.markdown-body {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.markdown-body p { margin: 0.25rem 0; }
+.markdown-body p:first-child { margin-top: 0; }
+.markdown-body p:last-child { margin-bottom: 0; }
+.markdown-body strong { font-weight: 700; color: #fff; }
+.markdown-body em { font-style: italic; }
+.markdown-body ul, .markdown-body ol { margin: 0.25rem 0 0.25rem 1.25rem; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: 0.1rem 0; }
+.markdown-body code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+.markdown-body pre {
+  background: #0a0a0a;
+  border: 1px solid #262626;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.4rem 0;
+  overflow-x: auto;
+}
+.markdown-body pre code { background: transparent; padding: 0; font-size: 0.8125rem; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  font-weight: 700;
+  margin: 0.4rem 0 0.2rem 0;
+}
+.markdown-body h1 { font-size: 1.1rem; }
+.markdown-body h2 { font-size: 1.05rem; }
+.markdown-body h3 { font-size: 1rem; }
+.markdown-body blockquote {
+  border-left: 3px solid #404040;
+  padding-left: 0.6rem;
+  color: #a3a3a3;
+  margin: 0.3rem 0;
+}
+.markdown-body a { color: #60a5fa; text-decoration: underline; }
+.markdown-body table { border-collapse: collapse; margin: 0.4rem 0; }
+.markdown-body th, .markdown-body td { border: 1px solid #404040; padding: 0.2rem 0.5rem; }
+
+/* Live mirror of the candidate's caret on the interviewer dashboard. A thin vertical bar with
+   a subtle blink so it reads as "someone else is typing here" without competing with the
+   interviewer's own selection. */
+.devlens-remote-cursor-caret::before {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background: #f59e0b;
+  margin-left: -1px;
+  vertical-align: text-top;
+  animation: devlens-cursor-blink 1.2s steps(2) infinite;
+}
+@keyframes devlens-cursor-blink {
+  0%, 50% { opacity: 1; }
+  50.1%, 100% { opacity: 0.2; }
+}

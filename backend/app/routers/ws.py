@@ -34,13 +34,14 @@ from app.db.base import SessionLocal
 from app.db.models import (
     InterviewSession,
     Profile,
+    SessionFile,
     SessionParticipant,
     SessionStatus,
     Transcript,
 )
 from app.redis_client import get_redis, publish, session_channel, subscribe
 from app.security import decode_token
-from app.services import agent, hallucinator, pushback, scorecard, telemetry
+from app.services import agent, hallucinator, pushback, scorecard, shell, telemetry
 from app.services.llm import build_guardrail_system
 from app.services.names import random_display_name
 
@@ -175,6 +176,50 @@ async def _end_interview(session_id: str, channel: str) -> None:
     telemetry.fire(_generate_scorecard_async(session_id, channel))
 
 
+async def _run_shell(
+    session_id: uuid.UUID, channel: str, command: str, single_file_code: str
+) -> None:
+    """Background runner for `shell_command`. Fetches the session's language + file tree from
+    the DB, dispatches to `shell.execute`, and publishes the result. Multi-file sessions use
+    the persisted tree; single-file sessions fall back to the code the candidate sent with
+    the command (their live editor buffer)."""
+    async with SessionLocal() as db:
+        interview = await db.get(InterviewSession, session_id)
+        if interview is None:
+            return
+        rows = list(
+            await db.scalars(
+                select(SessionFile).where(
+                    SessionFile.session_id == session_id,
+                    SessionFile.is_folder.is_(False),
+                )
+            )
+        )
+        language = interview.language
+    files = {r.path: r.content for r in rows}
+    try:
+        out = await shell.execute(
+            language=language,
+            files=files,
+            single_file_code=single_file_code,
+            command=command,
+        )
+    except Exception as e:
+        out = {"stdout": "", "stderr": f"shell error: {e}", "code": "1"}
+    await publish(
+        channel,
+        {
+            "type": "shell_output",
+            "payload": {
+                "command": command,
+                "stdout": out.get("stdout", ""),
+                "stderr": out.get("stderr", ""),
+                "exit": out.get("code", ""),
+            },
+        },
+    )
+
+
 async def _generate_scorecard_async(session_id: str, channel: str) -> None:
     try:
         card = await scorecard.generate_scorecard(session_id=session_id)
@@ -236,6 +281,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
         session_cfg = {
             "language": interview.language,
             "guardrail_preset": interview.guardrail_preset,
+            "guardrail_presets": list(interview.guardrail_presets or [interview.guardrail_preset]),
             "guardrail_custom": interview.guardrail_custom,
             "hallucination_pct": interview.hallucination_pct,
             "token_budget": interview.token_budget,
@@ -245,12 +291,36 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
     channel = session_channel(session_id)
     listener = asyncio.create_task(_pump_redis_to_ws(channel, websocket, is_interviewer))
-    await publish(channel, {"type": "presence", "payload": {actor: True}})
-    # Initial state pushes: budget snapshot + participant list (so the interviewer's panel and
-    # the candidate's waiting screen both render correctly on connect).
+
+    # Direct snapshot to this socket — does NOT go through Redis pub/sub. Sending via publish has
+    # a race: `pubsub.subscribe()` is async and the listener task may not be subscribed yet when
+    # the publish fires, so the connecting socket misses its own snapshot. (This is the bug where
+    # an interviewer joining a session AFTER the candidate had to refresh to see the join
+    # request.) Direct send guarantees the new socket gets current state immediately on connect.
     raw_budget = session_cfg.get("token_budget") or 0
     initial_budget = int(raw_budget) if isinstance(raw_budget, int) else 0
-    await _broadcast_budget(channel, session_id, initial_budget)
+    participants = await _participants_payload(session_uuid)
+    await websocket.send_json(
+        {"type": "participants", "payload": {"participants": participants}}
+    )
+    if initial_budget > 0:
+        used = await _tokens_used(session_id)
+        await websocket.send_json(
+            {
+                "type": "token_budget",
+                "payload": {
+                    "used": used,
+                    "budget": initial_budget,
+                    "remaining": max(initial_budget - used, 0),
+                    "blocked": used >= initial_budget,
+                },
+            }
+        )
+
+    # Broadcast to OTHER sockets so they refresh — e.g. the interviewer's participant panel
+    # sees the candidate's join in real time without needing a manual refresh. Presence event
+    # also notifies the other side that someone came online.
+    await publish(channel, {"type": "presence", "payload": {actor: True}})
     await _broadcast_participants(channel, session_uuid)
 
     try:
@@ -303,6 +373,113 @@ async def _handle_client_message(
         await publish(channel, {"type": "paste_flag", "payload": info})
         return
 
+    if mtype == "tab_switch":
+        # Candidate's tab visibility changed. We log every transition so the interviewer's UI
+        # can render a running count + the replay scrubber can show where the candidate was
+        # off-page. `hidden=True` means they left the interview tab.
+        if actor != "candidate":
+            return
+        info = {"hidden": bool(payload.get("hidden", False))}
+        telemetry.fire(
+            telemetry.record_event(
+                session_id=session_id, actor=actor, event_type="tab_switch", payload=info
+            )
+        )
+        await publish(channel, {"type": "tab_switch", "payload": info})
+        return
+
+    if mtype == "cursor_move":
+        # Throttled by the candidate (~10/s). We broadcast live (for the interviewer's cursor
+        # ghost) and log a sampled subset for replay idle detection.
+        if actor != "candidate":
+            return
+        if not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
+            return
+        info = {
+            "line": int(payload.get("line", 1) or 1),
+            "column": int(payload.get("column", 1) or 1),
+        }
+        await publish(channel, {"type": "cursor_move", "payload": info})
+        # Log a coarser event for the replay timeline. Down-sampling is done client-side so we
+        # don't write a row per keystroke.
+        telemetry.fire(
+            telemetry.record_event(
+                session_id=session_id, actor=actor, event_type="cursor_move", payload=info
+            )
+        )
+        return
+
+    if mtype == "file_change":
+        # Multi-file live edit. Payload: {path, content}. Authoritative copy lives in the DB
+        # (CRUD via /sessions/{id}/files); this event keeps the interviewer's mirror in sync
+        # between debounced PATCH saves.
+        if actor == "candidate" and not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
+            return
+        file_info: dict[str, Any] = {
+            "path": str(payload.get("path", "") or ""),
+            "content": str(payload.get("content", "") or ""),
+        }
+        if not file_info["path"]:
+            return
+        await publish(channel, {"type": "file_change", "payload": file_info})
+        telemetry.fire(
+            telemetry.record_event(
+                session_id=session_id,
+                actor=actor,
+                event_type="file_change",
+                # Don't log full file content into events.payload — just the path. We have the
+                # latest content on disk via the files API; events stay small.
+                payload={"path": file_info["path"]},
+            )
+        )
+        return
+
+    if mtype == "file_select":
+        # Candidate switched the active file tab. Mirror on the interviewer side so their view
+        # follows the candidate's attention. No DB write — purely UI state.
+        if actor != "candidate":
+            return
+        select_path: str = str(payload.get("path", "") or "")
+        if not select_path:
+            return
+        await publish(channel, {"type": "file_select", "payload": {"path": select_path}})
+        return
+
+    if mtype == "shell_command":
+        # Candidate's interactive terminal. We log + fire the actual execution as a background
+        # task so the inbound WS loop never blocks on Wandbox (the candidate can keep typing,
+        # and slow runs don't hold up code_change broadcasts). The result is published as a
+        # `shell_output` event so both the candidate and the interviewer see the same history.
+        if actor == "candidate" and not await _is_admitted(session_uuid, uuid.UUID(profile_id)):
+            return
+        cmd_text = str(payload.get("command", "")).strip()
+        if not cmd_text:
+            return
+        single_file_code = str(payload.get("code", "") or "")
+        telemetry.fire(
+            telemetry.record_event(
+                session_id=session_id,
+                actor=actor,
+                event_type="shell_command",
+                payload={"command": cmd_text},
+            )
+        )
+        telemetry.fire(_run_shell(session_uuid, channel, cmd_text, single_file_code))
+        return
+
+    if mtype == "mouse_move":
+        # Heartbeat used to compute idle gaps in the replay scrubber. NOT broadcast live —
+        # the interviewer doesn't need to see every mouse jiggle in real time; it's purely
+        # an activity marker logged to `events`. Sampled by the client to ~once per 2s.
+        if actor != "candidate":
+            return
+        telemetry.fire(
+            telemetry.record_event(
+                session_id=session_id, actor=actor, event_type="mouse_move", payload={}
+            )
+        )
+        return
+
     if mtype == "chat_message":
         if actor != "candidate":
             return
@@ -338,7 +515,8 @@ async def _handle_client_message(
 
         history = await _load_history(session_uuid)
         system_prompt = build_guardrail_system(
-            session_cfg["guardrail_preset"], session_cfg["guardrail_custom"]
+            session_cfg.get("guardrail_presets") or session_cfg["guardrail_preset"],
+            session_cfg["guardrail_custom"],
         )
         reply, used_tokens = await agent.generate_reply(
             query=content,
