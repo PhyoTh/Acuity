@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Database / cache
-    database_url: str = "postgresql+asyncpg://devlens:devlens@localhost:5432/devlens"
+    database_url: str = "postgresql+asyncpg://acuity:acuity@localhost:5432/acuity"
     redis_url: str = "redis://localhost:6379/0"
 
     # Supabase (server-side)

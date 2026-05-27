@@ -1,4 +1,9 @@
-# DevLens — Project Plan
+# Acuity — Project Plan
+
+> **Renamed 2026-05-26:** DevLens → **Acuity**. The repo directory is still
+> `DevLens/`, but everywhere the product is referenced in code, copy, and docs it is now
+> **Acuity**. See [ROADMAP.md](ROADMAP.md) for the design-system overhaul that accompanies
+> the rename.
 
 > **Audience:** the team (Sithu & Phyo) and our coding agents. This is the single source of truth
 > for *what we're building, the decisions we've locked, and what's done vs. not*. Read this before
@@ -6,7 +11,7 @@
 
 ## 1. Overview
 
-DevLens is a **live technical-interview platform**. A candidate solves a coding problem in a
+Acuity is a **live technical-interview platform**. A candidate solves a coding problem in a
 Monaco IDE with an embedded **AI assistant**; an interviewer silently watches a **real-time
 telemetry + evaluation dashboard**. The defining feature is the **Hallucination Injector**: the
 AI's correct output is, with an interviewer-set probability, subtly rewritten to contain
@@ -281,3 +286,62 @@ waiting-room flow with interviewer admit/kick (migration 0005).
 > **Tuning follow-up:** with `hints_only`, Haiku still tended to give full solutions — strengthen the
 > guardrail prompt (and/or use Sonnet) if strict hint-only behavior matters.
 > **Verified locally (post-rename):** `ruff`, `mypy` (strict), `pnpm build`.
+
+## 9. Acuity UI overhaul (2026-05-26)
+
+The product was renamed **DevLens → Acuity** and the frontend is being rebuilt against
+[ROADMAP.md](ROADMAP.md) — a detailed visual / interaction spec (design tokens in OKLCH,
+custom typography, an "Aperture" wordmark, per-screen specs for landing, auth, dashboard,
+wizard, live session, candidate IDE, summary, and candidate home). The product behavior — auth
+flow, WS protocol, hallucination injector, scorecard pipeline, etc. — is **unchanged**; the
+overhaul is strictly visual + a new public landing page.
+
+### 9a. Surfaces rebuilt (one commit per screen)
+
+- [ ] **Foundations** — design tokens in `app/globals.css`, Google fonts loaded via
+  `next/font`, base atmosphere (radial bloom + grid).
+- [ ] **`components/ui/` primitives** — Aperture, Wordmark, Pill, Sparkline, SectionLabel,
+  Card, Stat, Avatar, Icon, CodeBlock, HeatStrip, Progress.
+- [ ] **Landing page** at `/` — hero + interactive hallucination demo, How it works (3 steps
+  with previews), Features bento, Contact form, Footer.
+- [ ] **Auth** — `/login`, `/signup` share an `AuthLayout` (form column + promo column with
+  large Aperture decoration).
+- [ ] **Interviewer dashboard** at `/dashboard` — sidebar nav, 4-stat row, live-session
+  callout, sessions table, quick-start + recent-activity side column.
+- [ ] **Create session wizard** at `/dashboard/new` — 4-step layout with success card.
+- [ ] **Live session (interviewer)** at `/dashboard/[sessionId]` — 3-panel layout: telemetry
+  sidebar, code mirror + terminal, AI chat with reveal/mask toggle.
+- [ ] **Candidate IDE** at `/interview/[sessionId]` (and `/join/[code]`) — same 3-panel
+  layout but stripped of interviewer-only telemetry and hallucination flags.
+- [ ] **Session summary** — radar profile + dimension bars + AI summary + replay timeline +
+  final-solution / key-turns column.
+- [ ] **Candidate home** at `/candidate` — wordmark header, join-code form, history list.
+
+### 9b. Features in ROADMAP that are visual / mock-only (no backend yet)
+
+The roadmap mocks describe data and controls we don't have backend support for. These are
+rendered as **mock UI per the roadmap** but not wired to live data. Document/implement later:
+
+| Item | Where it appears | Status |
+|---|---|---|
+| Dashboard stats: "Sessions this week / Avg. caught AI errors / Median scorecard / Tokens spent" | `/dashboard` 4-stat row | Mock data via `lib/mocks.ts` |
+| Sparkline series on each stat | dashboard stat tiles | Mock |
+| "Recent activity" feed | `/dashboard` right column | Mock |
+| Quick-start preset buttons | `/dashboard` right column | Mock — buttons should still route to `/dashboard/new`, no preset preload yet |
+| Scheduled sessions (`pending` status + scheduled-time copy on the dashboard) | sessions table, `Calendar` feature card | No DB column for scheduled-time; session.status already supports `pending` but is never set on create |
+| Calendar / "Schedule ahead" feature card | landing Features bento | Pure decoration |
+| Cost footprint card ("$0.32 / session") | landing Features bento, landing hero footer copy | Pure decoration |
+| Privacy matrix card | landing Features bento | Pure decoration |
+| Mission-control mini-dashboard card | landing Features bento | Pure decoration |
+| Score callout card | landing Features bento | Pure decoration |
+| Integrity timeline card | landing Features bento | Pure decoration (the actual replay timeline on the summary page IS wired) |
+| Share-link decoration (acuity.app/join/...) | landing Features bento | Pure decoration |
+| Anthropic key card on the dashboard sidebar | `/dashboard` sidebar footer | UI only — the key is server-side env-driven; we do NOT yet support BYO keys per user |
+| "Export PDF" button on the summary | summary top-right | Not wired |
+| "Share read-only link" button on the summary | summary top-right | Not wired |
+| Radar chart on the summary | summary Profile card | Rendered from the existing `scorecard.scores` 4-dim numbers, no new backend |
+| AI summary tag row ("Independent debugger" / "Caught 3/4" / "Clean prompt habits") | summary | Derived heuristically from existing scorecard, but the chips themselves are not yet stored — render from current scorecard contents only |
+| Sparkline-rich live-session telemetry (code-change/AI-exchange/paste HeatStrips) | `/dashboard/[id]` left column | The underlying events are real (already logged); the HeatStrip aggregations may be mock if no live data is present |
+| Hero "demo card" hallucination injector slider | landing hero | Client-only mock — uses canned segments, no backend call |
+| Contact form submission | landing `#contact` | Client-only — shows success state, no email is actually sent |
+| "Acuity is free — bring your own Anthropic key" messaging | landing hero, Features bento | Aspirational — actual product is single shared key today |

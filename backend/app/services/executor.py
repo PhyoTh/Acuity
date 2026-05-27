@@ -23,7 +23,7 @@ import httpx
 
 _WANDBOX = "https://wandbox.org/api"
 
-# DevLens language id -> Wandbox `language` field
+# Acuity language id -> Wandbox `language` field
 _LANG = {
     "python": "Python",
     "javascript": "JavaScript",
@@ -35,15 +35,15 @@ _LANG = {
 # Extra Wandbox options per language.
 _OPTS: dict[str, dict[str, str]] = {"cpp": {"compiler-option-raw": "-std=c++17"}}
 
-_compilers: dict[str, str] | None = None  # DevLens lang -> chosen Wandbox compiler name
+_compilers: dict[str, str] | None = None  # Acuity lang -> chosen Wandbox compiler name
 
 
-def _choose(devlens_lang: str, names: list[str]) -> str:
+def _choose(acuity_lang: str, names: list[str]) -> str:
     """Pick a stable pinned compiler (avoid '*-head'; require cpython-3 for Python)."""
     for name in names:
         if "head" in name:
             continue
-        if devlens_lang == "python" and not name.startswith("cpython-3"):
+        if acuity_lang == "python" and not name.startswith("cpython-3"):
             continue
         return name
     return names[0] if names else ""
@@ -76,20 +76,20 @@ def _wrap_call(language: str, code: str, call: str) -> str:
     if language == "python":
         return (
             f"{code}\n\n"
-            "# --- DevLens test harness ---\n"
-            "import json as _devlens_json\n"
+            "# --- Acuity test harness ---\n"
+            "import json as _acuity_json\n"
             "try:\n"
-            f"    _devlens_result = {call}\n"
-            "    print(_devlens_json.dumps(_devlens_result, default=str))\n"
-            "except Exception as _devlens_e:\n"
-            "    import traceback as _devlens_tb\n"
-            "    _devlens_tb.print_exc()\n"
+            f"    _acuity_result = {call}\n"
+            "    print(_acuity_json.dumps(_acuity_result, default=str))\n"
+            "except Exception as _acuity_e:\n"
+            "    import traceback as _acuity_tb\n"
+            "    _acuity_tb.print_exc()\n"
             "    raise SystemExit(1)\n"
         )
     if language in ("javascript", "typescript"):
         return (
             f"{code}\n\n"
-            "// --- DevLens test harness ---\n"
+            "// --- Acuity test harness ---\n"
             f"console.log(JSON.stringify(({call})));\n"
         )
     return code

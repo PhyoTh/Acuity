@@ -62,8 +62,8 @@ export default function CodeEditor({
       {
         range,
         options: {
-          className: "devlens-remote-cursor",
-          beforeContentClassName: "devlens-remote-cursor-caret",
+          className: "acuity-remote-cursor",
+          beforeContentClassName: "acuity-remote-cursor-caret",
           stickiness: 1,
           hoverMessage: { value: "candidate cursor" },
         },

@@ -1,4 +1,7 @@
-# DevLens
+# Acuity
+
+> Formerly known as **DevLens**. Repository directory name still says `DevLens/`; the project,
+> wordmark, and product copy are now **Acuity**.
 
 An interactive, **live technical-interview** platform. A candidate solves a coding problem in a
 Monaco IDE with an embedded **AI assistant**, while an interviewer silently watches a **real-time

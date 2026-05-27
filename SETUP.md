@@ -1,6 +1,6 @@
-# DevLens — Setup Guide
+# Acuity — Setup Guide
 
-A step-by-step guide to run DevLens end-to-end, written for someone setting up **Supabase** and
+A step-by-step guide to run Acuity end-to-end, written for someone setting up **Supabase** and
 **Anthropic** for the first time. Everything except the Anthropic API usage is **free**.
 
 > Already know the stack? The TL;DR is at the bottom.
@@ -26,7 +26,7 @@ A step-by-step guide to run DevLens end-to-end, written for someone setting up *
    disable **Confirm email** (and Save). This lets sign-up return a session immediately so the
    interviewer/candidate flows work without an inbox round-trip. (Re-enable for production.)
 
-   > **JWT note:** DevLens verifies Supabase tokens for **both** signing setups automatically —
+   > **JWT note:** Acuity verifies Supabase tokens for **both** signing setups automatically —
    > asymmetric **ES256/RS256** user tokens via Supabase's JWKS endpoint, and legacy **HS256** (the
    > shared JWT Secret) for locally minted dev tokens. Either configuration works out of the box; the
    > JWT Secret is still used by `scripts/mint_test_token.py`. You do **not** need to create database
@@ -37,7 +37,7 @@ A step-by-step guide to run DevLens end-to-end, written for someone setting up *
 1. Sign up at [console.anthropic.com](https://console.anthropic.com). New accounts get a small
    **free credit** — enough for lots of interview testing.
 2. **Settings → API Keys → Create Key.** Copy it → `ANTHROPIC_API_KEY`.
-3. **Cost control (already configured for you):** DevLens defaults to the cheapest capable model
+3. **Cost control (already configured for you):** Acuity defaults to the cheapest capable model
    (`claude-haiku-4-5-20251001`), caps `max_tokens`, and caps chat history. With Haiku, a full
    mock interview costs only a few cents. To raise quality later, set
    `ANTHROPIC_MODEL=claude-sonnet-4-6` (more expensive).

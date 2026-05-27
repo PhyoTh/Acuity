@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -11,13 +12,14 @@ import ParticipantsPopover, { type Participant } from "@/components/Dashboard/Pa
 import SummaryView from "@/components/Dashboard/SummaryView";
 import DisplayNameModal from "@/components/DisplayNameModal";
 import MultiFileEditor, { type MultiFile } from "@/components/Editor/MultiFileEditor";
+import { Icon, Pill, SectionLabel, Wordmark } from "@/components/ui";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { EventRow, Scorecard } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
 function nameConfirmedKey(sessionId: string): string {
-  return `devlens:display-name-confirmed:${sessionId}`;
+  return `acuity:display-name-confirmed:${sessionId}`;
 }
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
@@ -67,7 +69,20 @@ export default function InterviewerSessionPage() {
   const [title, setTitle] = useState<string>("");
   const [createdAt, setCreatedAt] = useState<string>("");
   const [endedAt, setEndedAt] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState<string>("");
+  const [interviewType, setInterviewType] = useState<string>("");
+  const [elapsed, setElapsed] = useState(0);
   const socketRef = useRef<SessionSocket | null>(null);
+
+  // Live timer in the header — counts up from createdAt while the session is active.
+  useEffect(() => {
+    if (!createdAt || ended) return;
+    const start = new Date(createdAt).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [createdAt, ended]);
 
   const loadSummary = useCallback(async () => {
     // Fetch the post-mortem data: chat history, final code snapshot, last run, scorecard (may 404).
@@ -140,6 +155,8 @@ export default function InterviewerSessionPage() {
           setGuardrailPresets(interview.guardrail_presets);
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+        if ("join_code" in interview) setJoinCode(interview.join_code);
+        if ("interview_type" in interview) setInterviewType(interview.interview_type);
         if ("status" in interview && interview.status === "ended") {
           setEnded(true);
           // Summary mode is read-only — no live broadcast, no participant panel — so a display
@@ -216,8 +233,6 @@ export default function InterviewerSessionPage() {
           .listFiles(sessionId)
           .then((list) => {
             setFiles(list);
-            // Flip to multi-file mode the moment the candidate adds the first file. Active
-            // path stays whatever the interviewer was looking at unless it disappeared.
             if (list.length > 0) setHasFiles(true);
             setActivePath((cur) => {
               if (cur && list.some((f) => f.path === cur && !f.is_folder)) return cur;
@@ -243,8 +258,6 @@ export default function InterviewerSessionPage() {
       } else if (e.type === "participants") {
         setParticipants((e.payload as { participants: Participant[] }).participants);
       } else if (e.type === "interview_ended") {
-        // Backend split: this fires immediately when status flips to ended (before the
-        // scorecard LLM is done). Switch to summary mode now; scorecard fills in later.
         setEnded(true);
         void loadSummary();
       } else if (e.type === "scorecard_ready") {
@@ -323,33 +336,57 @@ export default function InterviewerSessionPage() {
     );
   }
 
+  const statusKind = status === "live" ? "live" : status === "disconnected" ? "bad" : "muted";
+
   return (
-    <main className="flex h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2">
-        <h1 className="text-sm font-semibold">
-          {ended ? "Session summary" : `Interviewer view · ${status}`}
-        </h1>
+    <main className="flex h-screen flex-col" style={{ background: "var(--bg-0)" }}>
+      {/* Top bar */}
+      <header
+        className="flex flex-wrap items-center gap-3"
+        style={{
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--line-1)",
+          background: "var(--bg-0)",
+        }}
+      >
+        <Link href="/dashboard" className="btn btn-ghost btn-sm" aria-label="Back to dashboard">
+          <Icon name="chevron-left" size={14} /> Back
+        </Link>
+        <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
+        <Link href="/"><Wordmark size={14} /></Link>
+        <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
+        <Pill kind={statusKind} pulse={status === "live"}>
+          {status === "live" ? `live · ${formatElapsed(elapsed)}` : status}
+        </Pill>
+        {title && (
+          <span style={{ fontSize: 13, color: "var(--fg-0)" }} className="display">
+            {title}
+          </span>
+        )}
+        {joinCode && (
+          <span className="mono" style={{ color: "var(--fg-3)", fontSize: 11 }}>
+            {joinCode}
+          </span>
+        )}
         {budget && (
-          <span className="text-xs text-neutral-400">
-            AI tokens: {budget.used.toLocaleString()}/{budget.budget.toLocaleString()}
+          <span className="mono tabular" style={{ color: "var(--fg-2)", fontSize: 11 }}>
+            tokens {budget.used.toLocaleString()}/{budget.budget.toLocaleString()}
           </span>
         )}
         {lastRun && lastRun.total > 0 && (
-          <span className="text-xs text-neutral-300">
-            last run {lastRun.passed}/{lastRun.total}
-          </span>
+          <Pill kind={lastRun.passed === lastRun.total ? "live" : "warn"}>
+            tests {lastRun.passed}/{lastRun.total}
+          </Pill>
         )}
         {pasteCount > 0 && (
-          <span className="text-xs font-semibold text-amber-400">
-            ⚠ {pasteCount} large paste(s)
-          </span>
+          <Pill kind="warn">
+            <Icon name="warn" size={11} /> {pasteCount} paste(s)
+          </Pill>
         )}
         {tabSwitchCount > 0 && (
-          <span
-            className={`text-xs font-semibold ${tabHidden ? "text-red-400" : "text-amber-400"}`}
-          >
-            {tabHidden ? "🔴 candidate is on another tab" : `⚠ ${tabSwitchCount} tab switch(es)`}
-          </span>
+          <Pill kind={tabHidden ? "bad" : "warn"} pulse={tabHidden}>
+            {tabHidden ? "on another tab" : `${tabSwitchCount} tab switch(es)`}
+          </Pill>
         )}
         <div className="ml-auto flex items-center gap-2">
           <ParticipantsPopover
@@ -361,50 +398,67 @@ export default function InterviewerSessionPage() {
           <button
             type="button"
             onClick={requestEndInterview}
-            className="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white"
+            className="btn btn-danger btn-sm"
           >
             End interview
           </button>
         </div>
       </header>
 
+      {/* 3-panel body */}
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal" autoSaveId="interview-interviewer-h">
+          {/* LEFT — problem + telemetry */}
           <Panel defaultSize={22} minSize={5} collapsible collapsedSize={3}>
-            <div className="flex h-full flex-col border-r border-neutral-800 bg-neutral-950">
-              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                Problem
-              </div>
-              <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-3 text-sm text-neutral-200">
-                {prompt || <span className="text-neutral-500">(no problem statement)</span>}
-              </div>
-            </div>
+            <PanelSidebar
+              prompt={prompt}
+              interviewType={interviewType}
+              language={language}
+              hallucinationPct={hallucinationPct}
+              pasteCount={pasteCount}
+              tabSwitchCount={tabSwitchCount}
+              budget={budget}
+              pushback={pushback}
+            />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
+          <PanelResizeHandle className="resize-handle-h" />
+
+          {/* CENTER — code mirror + terminal */}
           <Panel defaultSize={53} minSize={30}>
             <PanelGroup direction="vertical" autoSaveId="interview-interviewer-v">
               <Panel defaultSize={70} minSize={20}>
-                <div className="h-full">
-                  {hasFiles ? (
-                    <MultiFileEditor
-                      files={files}
-                      fallbackLanguage={language}
-                      activePath={activePath}
-                      onActivePathChange={setActivePath}
-                      remoteCursor={remoteCursor}
-                      readOnly
-                    />
-                  ) : (
-                    <CodeEditor
-                      value={code}
-                      language={language}
-                      readOnly
-                      remoteCursor={remoteCursor}
-                    />
-                  )}
+                <div className="flex h-full flex-col" style={{ background: "var(--bg-0)" }}>
+                  <div
+                    className="flex items-center justify-between"
+                    style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)" }}
+                  >
+                    <SectionLabel>Editor mirror</SectionLabel>
+                    <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
+                      {activePath ?? `solution.${extFor(language)}`} · {language}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    {hasFiles ? (
+                      <MultiFileEditor
+                        files={files}
+                        fallbackLanguage={language}
+                        activePath={activePath}
+                        onActivePathChange={setActivePath}
+                        remoteCursor={remoteCursor}
+                        readOnly
+                      />
+                    ) : (
+                      <CodeEditor
+                        value={code}
+                        language={language}
+                        readOnly
+                        remoteCursor={remoteCursor}
+                      />
+                    )}
+                  </div>
                 </div>
               </Panel>
-              <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
+              <PanelResizeHandle className="resize-handle-v" />
               <Panel defaultSize={30} minSize={8} collapsible collapsedSize={4}>
                 <InterviewerTerminalMirror
                   lastRun={lastRun}
@@ -413,11 +467,17 @@ export default function InterviewerSessionPage() {
               </Panel>
             </PanelGroup>
           </Panel>
-          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
+          <PanelResizeHandle className="resize-handle-h" />
+
+          {/* RIGHT — AI chat (mirror) */}
           <Panel defaultSize={25} minSize={5} collapsible collapsedSize={3}>
-            <div className="flex h-full flex-col border-l border-neutral-800">
-              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                AI chat {ended ? "(history)" : "(mirror)"}
+            <div className="flex h-full flex-col" style={{ borderLeft: "1px solid var(--line-1)", background: "var(--bg-0)" }}>
+              <div
+                className="flex items-center justify-between"
+                style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)" }}
+              >
+                <SectionLabel>AI chat {ended ? "(history)" : "(mirror)"}</SectionLabel>
+                <Pill kind="warn">halluc {hallucinationPct}%</Pill>
               </div>
               {!ended && (
                 <AIInfoHeader
@@ -431,55 +491,92 @@ export default function InterviewerSessionPage() {
                 <ChatBox messages={transcripts ?? messages} readOnly busy={!ended && aiBusy} />
               </div>
               {pushback.length > 0 && (
-                <div className="border-t border-neutral-800 p-3">
-                  <h3 className="mb-1 text-xs font-semibold text-neutral-300">
-                    Suggested push-back questions
-                  </h3>
-                  <ul className="list-disc space-y-1 pl-4 text-xs text-neutral-400">
+                <div
+                  style={{
+                    padding: 14,
+                    borderTop: "1px solid var(--line-1)",
+                    background: "var(--bg-1)",
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon name="sparkle" size={12} color="var(--signal)" />
+                    <SectionLabel>Suggested push-back</SectionLabel>
+                  </div>
+                  <ul className="mt-2 space-y-1.5 pl-1" style={{ fontSize: 12.5, color: "var(--fg-1)" }}>
                     {pushback.map((q, i) => (
-                      <li key={i}>{q}</li>
+                      <li key={i} className="flex items-start gap-2">
+                        <span style={{ color: "var(--signal)" }}>›</span>
+                        <span>{q}</span>
+                      </li>
                     ))}
                   </ul>
                 </div>
               )}
+              <div
+                className="mono flex items-center justify-between"
+                style={{
+                  padding: "8px 14px",
+                  borderTop: "1px solid var(--line-1)",
+                  background: "var(--bg-0)",
+                  color: "var(--fg-3)",
+                  fontSize: 10,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <span>Read-only mirror · candidate doesn&apos;t see corruption flags</span>
+              </div>
             </div>
           </Panel>
         </PanelGroup>
       </div>
+
       {endConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-lg border border-neutral-800 bg-neutral-950 p-5 shadow-xl">
-            <h2 className="text-lg font-semibold">End this interview?</h2>
-            <p className="mt-2 text-sm text-neutral-400">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "oklch(0 0 0 / 0.65)", backdropFilter: "blur(2px)", padding: 16 }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              background: "var(--bg-1)",
+              border: "1px solid var(--line-1)",
+              borderRadius: "var(--radius-lg)",
+              padding: 24,
+              boxShadow: "0 24px 48px -16px black",
+            }}
+          >
+            <SectionLabel>End interview</SectionLabel>
+            <h2 className="display mt-2" style={{ fontSize: 24 }}>End this interview?</h2>
+            <p className="mt-3" style={{ color: "var(--fg-2)", fontSize: 13.5, lineHeight: 1.55 }}>
               This will close the session for the candidate immediately and start generating the
               scorecard. You cannot reopen it.
             </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEndConfirmOpen(false)}
-                className="rounded border border-neutral-700 px-4 py-2 text-sm"
-              >
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setEndConfirmOpen(false)} className="btn">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={confirmEndInterview}
-                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white"
-              >
+              <button type="button" onClick={confirmEndInterview} className="btn btn-danger">
                 Yes, end interview
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Inline styles for the panel resize handles — must use real CSS to hook ::hover. */}
+      <style jsx global>{`
+        .resize-handle-h { width: 1px; background: var(--line-1); transition: background 0.12s ease; cursor: col-resize; }
+        .resize-handle-h:hover { background: var(--live); }
+        .resize-handle-v { height: 1px; background: var(--line-1); transition: background 0.12s ease; cursor: row-resize; }
+        .resize-handle-v:hover { background: var(--live); }
+      `}</style>
     </main>
   );
 }
 
 // Read-only mirror of the candidate's terminal panel for the interviewer dashboard. Shows the
-// candidate's last Run result + every shell command they typed during the session, so the
-// interviewer can see what they ran without needing the candidate to narrate it.
+// candidate's last Run result + every shell command they typed during the session.
 function InterviewerTerminalMirror({
   lastRun,
   shellHistory,
@@ -489,52 +586,204 @@ function InterviewerTerminalMirror({
 }) {
   const [tab, setTab] = useState<"run" | "shell">("run");
   return (
-    <div className="flex h-full flex-col border-t border-neutral-800 bg-black">
-      <div className="flex items-center border-b border-neutral-800 px-2 text-xs font-semibold uppercase tracking-wider">
-        <button
-          type="button"
-          onClick={() => setTab("run")}
-          className={`px-3 py-1.5 ${tab === "run" ? "border-b-2 border-emerald-500 text-emerald-300" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+    <div
+      className="flex h-full flex-col"
+      style={{ background: "var(--bg-0)", borderTop: "1px solid var(--line-1)" }}
+    >
+      <div
+        className="flex items-center"
+        style={{ borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)", padding: "0 10px" }}
+      >
+        <TerminalTab active={tab === "run"} onClick={() => setTab("run")} color="var(--live)">
           Runs
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("shell")}
-          className={`px-3 py-1.5 ${tab === "shell" ? "border-b-2 border-sky-400 text-sky-300" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+        </TerminalTab>
+        <TerminalTab active={tab === "shell"} onClick={() => setTab("shell")} color="var(--signal)">
           Shell ({shellHistory.length})
-        </button>
-        <span className="ml-auto py-1.5 text-neutral-500">
+        </TerminalTab>
+        <span className="mono ml-auto" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
           {tab === "run" && lastRun ? `last ${lastRun.passed}/${lastRun.total}` : ""}
         </span>
       </div>
-      <div className="flex-1 overflow-auto p-2 font-mono text-xs">
+      <div className="mono flex-1 overflow-auto" style={{ padding: 10, fontSize: 12 }}>
         {tab === "run" && (
-          <span className="text-neutral-500">
+          <span style={{ color: "var(--fg-3)" }}>
             {lastRun
               ? `Candidate's last run: ${lastRun.passed}/${lastRun.total} tests passed.`
               : "Waiting for the candidate to click Run…"}
           </span>
         )}
         {tab === "shell" && shellHistory.length === 0 && (
-          <span className="text-neutral-600">Candidate hasn&apos;t used the shell yet.</span>
+          <span style={{ color: "var(--fg-3)" }}>Candidate hasn&apos;t used the shell yet.</span>
         )}
         {tab === "shell" &&
           shellHistory.map((entry, i) => (
             <div key={i} className="mb-2">
-              <div className="text-neutral-400">
-                <span className="text-sky-400">$</span> {entry.command}
+              <div style={{ color: "var(--fg-2)" }}>
+                <span style={{ color: "var(--signal)" }}>$</span> {entry.command}
               </div>
               {entry.stdout && (
-                <pre className="whitespace-pre-wrap text-neutral-200">{entry.stdout}</pre>
+                <pre className="whitespace-pre-wrap" style={{ color: "var(--fg-0)" }}>{entry.stdout}</pre>
               )}
               {entry.stderr && (
-                <pre className="whitespace-pre-wrap text-red-400">{entry.stderr}</pre>
+                <pre className="whitespace-pre-wrap" style={{ color: "var(--bad)" }}>{entry.stderr}</pre>
               )}
             </div>
           ))}
       </div>
     </div>
   );
+}
+
+function TerminalTab({
+  active,
+  onClick,
+  color,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mono"
+      style={{
+        padding: "8px 12px",
+        background: "transparent",
+        color: active ? "var(--fg-0)" : "var(--fg-3)",
+        fontSize: 11,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        border: "none",
+        borderBottom: `2px solid ${active ? color : "transparent"}`,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PanelSidebar({
+  prompt,
+  interviewType,
+  language,
+  hallucinationPct,
+  pasteCount,
+  tabSwitchCount,
+  budget,
+  pushback,
+}: {
+  prompt: string;
+  interviewType: string;
+  language: string;
+  hallucinationPct: number;
+  pasteCount: number;
+  tabSwitchCount: number;
+  budget: { used: number; budget: number; remaining: number } | null;
+  pushback: string[];
+}) {
+  return (
+    <div
+      className="flex h-full flex-col"
+      style={{ borderRight: "1px solid var(--line-1)", background: "var(--bg-0)" }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)" }}
+      >
+        <SectionLabel>Problem</SectionLabel>
+        <div className="flex items-center gap-1.5">
+          {interviewType && <Pill kind="muted">{interviewType}</Pill>}
+          {language && <Pill kind="signal">{language}</Pill>}
+          {hallucinationPct > 0 && <Pill kind="warn">halluc {hallucinationPct}%</Pill>}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto" style={{ padding: 14 }}>
+        <div
+          className="whitespace-pre-wrap"
+          style={{ color: "var(--fg-1)", fontSize: 13, lineHeight: 1.55 }}
+        >
+          {prompt || <span style={{ color: "var(--fg-3)" }}>(no problem statement)</span>}
+        </div>
+
+        <div className="mt-6">
+          <SectionLabel>Telemetry</SectionLabel>
+          <div className="mt-3 flex flex-col gap-3" style={{ fontSize: 12 }}>
+            <TelemetryRow
+              icon="circle"
+              iconColor={budget && budget.remaining < (budget.budget * 0.15) ? "var(--warn)" : "var(--live)"}
+              label="Token budget"
+              value={
+                budget
+                  ? `${budget.used.toLocaleString()} / ${budget.budget.toLocaleString()}`
+                  : "—"
+              }
+            />
+            <TelemetryRow
+              icon="warn"
+              iconColor={pasteCount > 0 ? "var(--warn)" : "var(--fg-3)"}
+              label="Paste events"
+              value={pasteCount > 0 ? `${pasteCount} flagged` : "0"}
+            />
+            <TelemetryRow
+              icon="eye-off"
+              iconColor={tabSwitchCount > 0 ? "var(--warn)" : "var(--fg-3)"}
+              label="Tab switches"
+              value={tabSwitchCount > 0 ? `${tabSwitchCount}` : "0"}
+            />
+            <TelemetryRow
+              icon="sparkle"
+              iconColor={pushback.length > 0 ? "var(--signal)" : "var(--fg-3)"}
+              label="Push-back hints"
+              value={pushback.length > 0 ? `${pushback.length} ready` : "—"}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TelemetryRow({
+  icon,
+  iconColor,
+  label,
+  value,
+}: {
+  icon: "circle" | "warn" | "eye-off" | "sparkle";
+  iconColor: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="flex items-center gap-2" style={{ color: "var(--fg-2)" }}>
+        <Icon name={icon} size={12} color={iconColor} />
+        {label}
+      </span>
+      <span className="mono tabular" style={{ color: "var(--fg-0)" }}>{value}</span>
+    </div>
+  );
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function extFor(language: string): string {
+  return ({
+    python: "py",
+    javascript: "js",
+    typescript: "ts",
+    java: "java",
+    cpp: "cpp",
+    go: "go",
+    sql: "sql",
+  } as Record<string, string>)[language] ?? "txt";
 }

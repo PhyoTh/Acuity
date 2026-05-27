@@ -1,4 +1,4 @@
-# DevLens Backend
+# Acuity Backend
 
 FastAPI real-time gateway + AI services. See the repo root [CLAUDE.md](../CLAUDE.md) for
 conventions and [plan.md](../plan.md) for the roadmap.

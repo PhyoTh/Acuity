@@ -1,4 +1,4 @@
-"""SQLAlchemy models for DevLens.
+"""SQLAlchemy models for Acuity.
 
 All tables live in the Supabase Postgres alongside Supabase's `auth` schema. We do NOT FK into
 `auth.users` (it's in a separate schema we don't own); instead `profiles.id` *equals* the auth
@@ -31,7 +31,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
-    """Declarative base for all DevLens ORM models."""
+    """Declarative base for all Acuity ORM models."""
 
 
 class Role(enum.StrEnum):

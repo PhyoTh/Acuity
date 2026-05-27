@@ -21,7 +21,7 @@ import shlex
 from app.services import executor
 
 _HELP = (
-    "DevLens terminal — available commands:\n"
+    "Acuity terminal — available commands:\n"
     "  help                       show this help\n"
     "  ls [path]                  list files (optionally under a folder)\n"
     "  cat <path>                 print a file's contents\n"

@@ -3,125 +3,406 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { DashboardSidebar } from "@/components/Dashboard/Sidebar";
+import { Avatar, HeatStrip, Icon, Pill, Progress, SectionLabel, Stat } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { SessionStatus, SessionSummary } from "@/lib/types";
+import { ACTIVITY, STATS } from "@/lib/mocks";
+import type { Profile, SessionStatus, SessionSummary } from "@/lib/types";
 
-const STATUS_OPTIONS: ("all" | SessionStatus)[] = ["all", "pending", "active", "ended"];
+const FILTERS: ("all" | SessionStatus)[] = ["all", "active", "pending", "ended"];
 
-// Interviewer dashboard home: a searchable, filterable list of the interviewer's sessions.
-// The create form lives on its own route (`/dashboard/new`) reached via the "+ New session" button.
+// Interviewer home — sidebar nav, 4-stat row (mock), live-session callout (real
+// active session if any), filterable sessions table (real), and a side column
+// with Quick start + Recent activity (mock). See plan.md §9b for the mock items.
 export default function DashboardHome() {
+  const [me, setMe] = useState<Profile | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [language, setLanguage] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | SessionStatus>("all");
 
   useEffect(() => {
-    api
-      .listSessions()
-      .then((rows) => {
-        setSessions(rows);
-        setError(null);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load sessions"))
-      .finally(() => setLoading(false));
+    api.me().then(setMe).catch(() => setMe(null));
   }, []);
 
-  const languages = useMemo(
-    () => Array.from(new Set(sessions.map((s) => s.language))).sort(),
-    [sessions],
-  );
+  function refresh() {
+    setLoading(true);
+    api
+      .listSessions()
+      .then((rows) => { setSessions(rows); setError(null); })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load sessions"))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(refresh, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sessions.filter((s) => {
       if (statusFilter !== "all" && s.status !== statusFilter) return false;
-      if (language !== "all" && s.language !== language) return false;
       if (q && !s.title.toLowerCase().includes(q) && !s.join_code.toLowerCase().includes(q))
         return false;
       return true;
     });
-  }, [sessions, query, language, statusFilter]);
+  }, [sessions, query, statusFilter]);
 
-  const field = "rounded bg-neutral-900 px-3 py-2 text-sm outline-none";
+  const liveSession = useMemo(
+    () => sessions.find((s) => s.status === "active"),
+    [sessions],
+  );
+
+  const displayName = me?.display_name ?? "interviewer";
+  const greeting = greetingForNow();
+  const liveCount = sessions.filter((s) => s.status === "active").length;
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Interviewer dashboard</h1>
-        <Link
-          href="/dashboard/new"
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
-        >
-          + New session
-        </Link>
-      </div>
+    <div className="flex">
+      <DashboardSidebar activeKey="sessions" />
+      <main className="flex-1" style={{ padding: "32px 40px 80px" }}>
+        {/* Header */}
+        <header className="flex items-start justify-between">
+          <div>
+            <SectionLabel>{displayName} · interviewer</SectionLabel>
+            <h1
+              className="display mt-2"
+              style={{ fontSize: 44, lineHeight: 1.04, letterSpacing: "-0.02em", maxWidth: 760 }}
+            >
+              {greeting}.{" "}
+              <span className="display-italic" style={{ color: "var(--live)" }}>
+                {liveCount === 0
+                  ? "No sessions live."
+                  : liveCount === 1
+                  ? "One session is live."
+                  : `${liveCount} sessions live.`}
+              </span>
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="btn btn-ghost btn-sm" onClick={refresh}>
+              <Icon name="refresh" size={14} /> Refresh
+            </button>
+            <Link href="/dashboard/new" className="btn btn-primary">
+              <Icon name="plus" size={14} /> New session
+            </Link>
+          </div>
+        </header>
 
-      <section className="space-y-3 rounded border border-neutral-800 p-4">
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-          <input
-            className={field}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by title or join code…"
+        {/* Stats row — mock per plan.md §9b */}
+        <div className="mt-8 grid gap-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <Stat
+            label="Sessions this week"
+            value={STATS.sessionsThisWeek.value}
+            sub={STATS.sessionsThisWeek.sub}
+            spark={STATS.sessionsThisWeek.spark}
+            accent="var(--fg-0)"
           />
-          <select
-            className={field}
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-          >
-            <option value="all">All languages</option>
-            {languages.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <select
-            className={field}
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "all" | SessionStatus)}
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s === "all" ? "All statuses" : s}
-              </option>
-            ))}
-          </select>
+          <Stat
+            label="Avg. caught AI errors"
+            value={STATS.avgCaught.value}
+            sub={STATS.avgCaught.sub}
+            spark={STATS.avgCaught.spark}
+            accent="var(--warn)"
+          />
+          <Stat
+            label="Median scorecard"
+            value={STATS.medianScore.value}
+            sub={STATS.medianScore.sub}
+            spark={STATS.medianScore.spark}
+            accent="var(--signal)"
+          />
+          <Stat
+            label="Tokens spent"
+            value={STATS.tokensSpent.value}
+            sub={STATS.tokensSpent.sub}
+            spark={STATS.tokensSpent.spark}
+            accent="var(--live)"
+          />
         </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        {loading && <p className="text-sm text-neutral-500">Loading…</p>}
-
-        <ul className="space-y-2">
-          {filtered.map((s) => (
-            <li
-              key={s.id}
-              className="flex items-center justify-between rounded border border-neutral-800 p-3 text-sm hover:border-neutral-700"
-            >
-              <div className="min-w-0">
-                <Link href={`/dashboard/${s.id}`} className="font-medium underline">
-                  {s.title}
-                </Link>
-                <div className="text-xs text-neutral-500">
-                  {s.language} · {s.status} ·{" "}
-                  {new Date(s.created_at).toLocaleString()}
+        {/* Live session callout */}
+        {liveSession ? (
+          <Link
+            href={`/dashboard/${liveSession.id}`}
+            className="mt-6 block"
+            style={{
+              background:
+                "linear-gradient(135deg, var(--bg-1), oklch(0.18 0.012 155 / 0.5))",
+              border: "1px solid var(--live)",
+              borderRadius: "var(--radius-lg)",
+              padding: 22,
+              textDecoration: "none",
+              boxShadow: "0 0 0 1px oklch(0.74 0.16 155 / 0.06)",
+            }}
+          >
+            <div className="grid items-center gap-6" style={{ gridTemplateColumns: "1.4fr 1fr 1fr auto" }}>
+              <div>
+                <div className="flex items-center gap-3">
+                  <Pill kind="live" pulse>live</Pill>
+                  <span className="mono" style={{ color: "var(--fg-2)", fontSize: 11 }}>
+                    {liveSession.join_code}
+                  </span>
+                </div>
+                <div className="display mt-2" style={{ fontSize: 24, color: "var(--fg-0)" }}>
+                  {liveSession.title}
+                </div>
+                <div className="mt-1 flex items-center gap-2" style={{ fontSize: 12.5, color: "var(--fg-2)" }}>
+                  <Avatar name="candidate" size={20} />
+                  candidate · {liveSession.interview_type} · {liveSession.language}
                 </div>
               </div>
-              <code className="text-xs text-neutral-400">{s.join_code}</code>
-            </li>
-          ))}
-          {!loading && filtered.length === 0 && !error && (
-            <p className="text-sm text-neutral-500">
-              {sessions.length === 0
-                ? "No sessions yet — click + New session to create one."
-                : "No sessions match the current filters."}
-            </p>
-          )}
-        </ul>
-      </section>
-    </main>
+              <div>
+                <SectionLabel>Token budget</SectionLabel>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="display tabular" style={{ fontSize: 28, color: "var(--fg-0)" }}>1,242</span>
+                  <span className="mono" style={{ color: "var(--fg-2)", fontSize: 12 }}>/ 6,000</span>
+                </div>
+                <div className="mt-2"><Progress value={1242} max={6000} color="var(--live)" /></div>
+              </div>
+              <div>
+                <SectionLabel>AI corruption</SectionLabel>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="display tabular" style={{ fontSize: 28, color: "var(--warn)" }}>1 / 2</span>
+                  <span className="mono" style={{ color: "var(--fg-2)", fontSize: 12 }}>caught</span>
+                </div>
+                <div className="mt-2"><HeatStrip values={[1, 2, 1, 3, 1, 0, 2, 1]} color="var(--warn)" /></div>
+              </div>
+              <span className="btn btn-primary">
+                Open live view <Icon name="arrow-right" size={14} />
+              </span>
+            </div>
+          </Link>
+        ) : null}
+
+        {/* Sessions table + side column */}
+        <div className="mt-8 grid gap-6" style={{ gridTemplateColumns: "1fr 320px" }}>
+          {/* Sessions table */}
+          <div>
+            <div className="flex items-center justify-between">
+              <SectionLabel>All sessions</SectionLabel>
+              <div className="flex items-center gap-3">
+                <div
+                  className="relative"
+                  style={{
+                    background: "var(--bg-1)",
+                    border: "1px solid var(--line-1)",
+                    borderRadius: "var(--radius)",
+                    width: 260,
+                  }}
+                >
+                  <span style={{ position: "absolute", top: 9, left: 10 }}>
+                    <Icon name="search" size={14} color="var(--fg-3)" />
+                  </span>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="search title or code…"
+                    className="input"
+                    style={{ paddingLeft: 32, border: "none", background: "transparent" }}
+                  />
+                </div>
+                <div
+                  className="flex"
+                  style={{
+                    background: "var(--bg-1)",
+                    border: "1px solid var(--line-1)",
+                    borderRadius: "var(--radius)",
+                    padding: 2,
+                  }}
+                >
+                  {FILTERS.map((f) => {
+                    const isActive = f === statusFilter;
+                    return (
+                      <button
+                        key={f}
+                        onClick={() => setStatusFilter(f)}
+                        className="mono"
+                        style={{
+                          padding: "5px 10px",
+                          background: isActive ? "var(--bg-3)" : "transparent",
+                          color: isActive ? "var(--fg-0)" : "var(--fg-2)",
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          borderRadius: 4,
+                          border: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {f}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="mt-3"
+              style={{
+                background: "var(--bg-1)",
+                border: "1px solid var(--line-1)",
+                borderRadius: "var(--radius-lg)",
+                overflow: "hidden",
+              }}
+            >
+              {loading && (
+                <div className="mono" style={{ padding: 16, color: "var(--fg-3)", fontSize: 12 }}>
+                  loading…
+                </div>
+              )}
+              {error && (
+                <div className="mono" style={{ padding: 16, color: "var(--bad)", fontSize: 12 }}>
+                  {error}
+                </div>
+              )}
+              {!loading && filtered.length === 0 && !error && (
+                <div style={{ padding: 18, color: "var(--fg-2)", fontSize: 13 }}>
+                  {sessions.length === 0
+                    ? "No sessions yet — click + New session to create one."
+                    : "No sessions match the current filters."}
+                </div>
+              )}
+              {filtered.map((s, i) => (
+                <SessionRow key={s.id} session={s} divider={i < filtered.length - 1} />
+              ))}
+            </div>
+          </div>
+
+          {/* Side column */}
+          <aside className="flex flex-col gap-5">
+            <div
+              style={{
+                background: "var(--bg-1)",
+                border: "1px solid var(--line-1)",
+                borderRadius: "var(--radius-lg)",
+                padding: 18,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <Icon name="sparkle" size={14} color="var(--live)" />
+                <SectionLabel>Quick start</SectionLabel>
+              </div>
+              <div className="mt-3 flex flex-col gap-2">
+                {[
+                  { title: "Algorithm",     sub: "syntax_only · 4k tokens", recommended: false },
+                  { title: "Debugging",     sub: "hints_only · 30% halluc · 6k", recommended: true },
+                  { title: "System design", sub: "open · 20k tokens",       recommended: false },
+                ].map((p) => (
+                  <Link
+                    key={p.title}
+                    href="/dashboard/new"
+                    className="flex items-start justify-between gap-2"
+                    style={{
+                      padding: "10px 12px",
+                      background: "var(--bg-2)",
+                      border: "1px solid var(--line-1)",
+                      borderRadius: "var(--radius)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <div>
+                      <div style={{ color: "var(--fg-0)", fontSize: 13 }}>{p.title}</div>
+                      <div className="mono mt-0.5" style={{ color: "var(--fg-3)", fontSize: 10 }}>
+                        {p.sub}
+                      </div>
+                    </div>
+                    {p.recommended && <Pill kind="live">recommended</Pill>}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "var(--bg-1)",
+                border: "1px solid var(--line-1)",
+                borderRadius: "var(--radius-lg)",
+                padding: 18,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <Icon name="clock" size={14} color="var(--signal)" />
+                <SectionLabel>Recent activity</SectionLabel>
+              </div>
+              <div className="mt-3 flex flex-col gap-2.5">
+                {ACTIVITY.map((a, i) => (
+                  <div key={i} className="flex items-start gap-2.5" style={{ fontSize: 12.5 }}>
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 999,
+                        marginTop: 6,
+                        background: `var(--${a.color === "fg-2" ? "fg-2" : a.color})`,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div className="flex-1">
+                      <span style={{ color: "var(--fg-0)" }}>{a.who}</span>
+                      <span style={{ color: "var(--fg-2)" }}> {a.what} </span>
+                      <span style={{ color: "var(--fg-1)" }}>{a.target}</span>
+                    </div>
+                    <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10 }}>{a.when}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
   );
+}
+
+function SessionRow({ session, divider }: { session: SessionSummary; divider: boolean }) {
+  const statusPill: Record<SessionStatus, React.ReactNode> = {
+    active:  <Pill kind="live" pulse>live</Pill>,
+    pending: <Pill kind="signal">pending</Pill>,
+    ended:   <Pill kind="muted">ended</Pill>,
+  };
+  return (
+    <Link
+      href={`/dashboard/${session.id}`}
+      className="grid items-center gap-3"
+      style={{
+        gridTemplateColumns: "2fr 100px 1fr 1fr 1fr 80px",
+        padding: "14px 18px",
+        borderBottom: divider ? "1px solid var(--line-1)" : "none",
+        background: "transparent",
+        textDecoration: "none",
+        transition: "background 0.12s ease",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-2)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <div className="min-w-0">
+        <div className="truncate" style={{ color: "var(--fg-0)", fontSize: 13.5 }}>{session.title}</div>
+        <div className="mono mt-0.5" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
+          {session.interview_type} · {session.language}
+        </div>
+      </div>
+      {statusPill[session.status]}
+      <div className="flex items-center gap-2" style={{ fontSize: 12, color: "var(--fg-2)" }}>
+        <Avatar name="candidate" size={20} />
+        candidate
+      </div>
+      <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
+        {new Date(session.created_at).toLocaleString()}
+      </span>
+      <span className="mono" style={{ color: "var(--fg-2)", fontSize: 10.5 }}>
+        {session.status === "ended" ? "scorecard ready" : ""}
+      </span>
+      <span className="mono text-right" style={{ color: "var(--fg-2)", fontSize: 10.5 }}>
+        {session.join_code}
+      </span>
+    </Link>
+  );
+}
+
+function greetingForNow(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }

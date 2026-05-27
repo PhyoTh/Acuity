@@ -9,13 +9,14 @@ import AIInfoHeader from "@/components/Chat/AIInfoHeader";
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
 import DisplayNameModal from "@/components/DisplayNameModal";
 import MultiFileEditor, { type MultiFile } from "@/components/Editor/MultiFileEditor";
+import { Aperture, Avatar, Icon, Pill, Progress, SectionLabel, Wordmark } from "@/components/ui";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { RunResult } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
 function nameConfirmedKey(sessionId: string): string {
-  return `devlens:display-name-confirmed:${sessionId}`;
+  return `acuity:display-name-confirmed:${sessionId}`;
 }
 
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
@@ -66,6 +67,11 @@ export default function CandidateSessionPage() {
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
   const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
+  const [title, setTitle] = useState<string>("");
+  const [joinCode, setJoinCode] = useState<string>("");
+  const [interviewType, setInterviewType] = useState<string>("");
+  const [createdAt, setCreatedAt] = useState<string>("");
+  const [elapsed, setElapsed] = useState(0);
 
   const [files, setFiles] = useState<MultiFile[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -78,6 +84,16 @@ export default function CandidateSessionPage() {
   const myProfileIdRef = useRef<string | null>(null);
   const lastCursorSendRef = useRef<number>(0);
   const fileSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Live timer counts up from createdAt.
+  useEffect(() => {
+    if (!createdAt || ended || admitted !== true) return;
+    const start = new Date(createdAt).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [createdAt, ended, admitted]);
 
   // Bootstrap: load profile + session config, decide whether to show the display-name modal.
   // The WS connection is gated on `nameReady` so the participant broadcast carries the final name.
@@ -121,6 +137,10 @@ export default function CandidateSessionPage() {
           setGuardrailPresets(interview.guardrail_presets);
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+        if ("title" in interview) setTitle(interview.title);
+        if ("join_code" in interview) setJoinCode(interview.join_code);
+        if ("interview_type" in interview) setInterviewType(interview.interview_type);
+        if ("created_at" in interview) setCreatedAt(interview.created_at);
       } catch {
         // non-fatal — proceed without prefill
       }
@@ -271,14 +291,6 @@ export default function CandidateSessionPage() {
   }
 
   // Build the code context sent to the AI on each chat turn.
-  //   - Single-file mode: just the editor buffer (codeRef).
-  //   - Multi-file mode: every file in the tree, prefixed with a `--- path ---` header. The
-  //     active file is moved to the front so the AI sees it first (matters when we hit the
-  //     size cap below). Folders are skipped; binaries that can't be `text()`-decoded never
-  //     enter `files` in the first place.
-  // We cap total size at ~50KB so a giant uploaded project doesn't single-handedly drain the
-  // session's token budget. When truncated, we surface that to the model explicitly so it
-  // doesn't pretend it saw everything.
   function buildCodeContext(): string {
     if (!hasFiles) return codeRef.current;
     const MAX_BYTES = 50_000;
@@ -319,8 +331,6 @@ export default function CandidateSessionPage() {
   function onShellCommand(cmd: string) {
     const trimmed = cmd.trim();
     if (!trimmed) return;
-    // `clear` is client-only — never hits the server. Other commands round-trip through the
-    // backend so the interviewer mirrors the same history.
     if (trimmed === "clear") {
       setShellHistory([]);
       return;
@@ -336,8 +346,6 @@ export default function CandidateSessionPage() {
     setRunning(true);
     setNotice(null);
     try {
-      // Multi-file mode: server reads files from session_files and ignores `code`. Single-file
-      // mode: server uses the code we send.
       setRunResult(await api.runCode(sessionId, hasFiles ? "" : codeRef.current));
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Run failed");
@@ -347,9 +355,6 @@ export default function CandidateSessionPage() {
   }
 
   // --- multi-file project ops -------------------------------------------------------------
-  // Edits are debounced per-file: each keystroke updates local state immediately + queues a
-  // PATCH save 500ms later, and broadcasts a live `file_change` WS event so the interviewer's
-  // mirror stays current between saves.
   function onFileContentChange(path: string, content: string) {
     setFiles((prev) => prev.map((f) => (f.path === path ? { ...f, content } : f)));
     socketRef.current?.send("file_change", { path, content });
@@ -382,7 +387,6 @@ export default function CandidateSessionPage() {
     try {
       const updated = await api.updateFile(sessionId, id, { path: newPath });
       setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, path: updated.path } : f)));
-      // If the renamed file was active, follow it.
       setActivePath((cur) => {
         if (!cur) return cur;
         const old = files.find((f) => f.id === id);
@@ -398,7 +402,6 @@ export default function CandidateSessionPage() {
     const removed = files.find((f) => f.id === id);
     try {
       await api.deleteFile(sessionId, id);
-      // Drop the file and any descendants (if it was a folder).
       setFiles((prev) =>
         prev.filter((f) => {
           if (!removed) return f.id !== id;
@@ -414,10 +417,6 @@ export default function CandidateSessionPage() {
 
   async function onFileUpload(uploaded: FileList, intoFolder: string) {
     const base = intoFolder ? `${intoFolder}/` : "";
-    // Process all selected files in parallel — large multi-file uploads (e.g. a whole project
-    // folder) were noticeably slow when awaited sequentially. We still surface per-file errors
-    // via setNotice; one failure doesn't abort the rest. `webkitRelativePath` is populated for
-    // folder uploads (via the directory picker) so nested structure is preserved.
     const results = await Promise.all(
       Array.from(uploaded).map(async (file) => {
         const wkrp = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
@@ -460,46 +459,28 @@ export default function CandidateSessionPage() {
   }
 
   if (ended) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
-        <h1 className="text-2xl font-bold">Interview ended</h1>
-        <p className="text-sm text-neutral-400">
-          Thanks for your time. The interviewer has wrapped up this session.
-        </p>
-        <button
-          type="button"
-          onClick={() => router.push("/candidate")}
-          className="mx-auto rounded bg-white px-4 py-2 text-sm font-medium text-black"
-        >
-          Go to dashboard
-        </button>
-      </main>
-    );
+    return <FullscreenMessage
+      icon={<Icon name="check" size={26} color="var(--live)" />}
+      iconBg="var(--live-dim)"
+      iconBorder="var(--live)"
+      title="Interview ended"
+      subtitle="Thanks for your time. The interviewer has wrapped up this session."
+      action={{ label: "Go to dashboard", onClick: () => router.push("/candidate") }}
+    />;
   }
 
   if (kicked) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
-        <h1 className="text-2xl font-bold">You were removed from the interview</h1>
-        <p className="text-sm text-neutral-400">
-          The interviewer ended your participation in this session.
-        </p>
-        <button
-          type="button"
-          onClick={() => router.push("/")}
-          className="mx-auto rounded bg-white px-4 py-2 text-sm font-medium text-black"
-        >
-          Back to home
-        </button>
-      </main>
-    );
+    return <FullscreenMessage
+      icon={<Icon name="warn" size={22} color="var(--bad)" />}
+      iconBg="var(--bad-dim)"
+      iconBorder="var(--bad)"
+      title="You were removed from the interview"
+      subtitle="The interviewer ended your participation in this session."
+      action={{ label: "Back to home", onClick: () => router.push("/") }}
+    />;
   }
 
-  // Render the waiting screen until the server has confirmed admit=true. We used to fall through
-  // to the IDE optimistically while `admitted` was still `null` (initial state, before the
-  // participants WS event arrived) — that let the candidate briefly see and type into the editor
-  // before approval, which is exactly the sync bug we hit. Now: anything other than an explicit
-  // `true` from the server keeps them on the waiting screen.
+  // Render the waiting screen until the server has confirmed admit=true.
   if (admitted !== true) {
     const heading =
       admitted === false
@@ -510,67 +491,162 @@ export default function CandidateSessionPage() {
         ? "You've joined the session. The interviewer needs to admit you before the interview starts. Keep this tab open."
         : "Checking your approval status. This usually takes a second.";
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
-        <div className="mx-auto h-12 w-12 animate-pulse rounded-full bg-emerald-500/30" />
-        <h1 className="text-2xl font-bold">{heading}</h1>
-        <p className="text-sm text-neutral-400">{subtitle}</p>
-        <p className="text-xs text-neutral-600">Connection: {status}</p>
+      <main className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
+        <div
+          aria-hidden
+          style={{ position: "fixed", inset: 0, opacity: 0.06, pointerEvents: "none", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <Aperture size={520} color="var(--live)" />
+        </div>
+        <span className="live-pulse-dot" style={{ width: 14, height: 14 }} />
+        <h1 className="display mt-5" style={{ fontSize: 36, lineHeight: 1.05, letterSpacing: "-0.02em" }}>
+          {heading}
+        </h1>
+        <p className="mt-3" style={{ color: "var(--fg-2)", fontSize: 14.5, maxWidth: 460 }}>
+          {subtitle}
+        </p>
+        <p className="mono mt-5" style={{ color: "var(--fg-3)", fontSize: 11, letterSpacing: "0.06em" }}>
+          connection: {status}
+        </p>
       </main>
     );
   }
 
   // From here on the candidate has been explicitly admitted by the interviewer.
   return (
-    <main className="flex h-screen flex-col">
-      <header className="flex items-center gap-3 border-b border-neutral-800 px-4 py-2">
-        <h1 className="text-sm font-semibold">Interview · {status}</h1>
-        {budget && (
-          <span className="text-xs text-neutral-400">
-            AI tokens: {budget.used.toLocaleString()} / {budget.budget.toLocaleString()} (
-            {budget.remaining.toLocaleString()} left)
+    <main className="flex h-screen flex-col" style={{ background: "var(--bg-0)" }}>
+      <header
+        className="flex items-center gap-3"
+        style={{
+          padding: "10px 20px",
+          borderBottom: "1px solid var(--line-1)",
+          background: "var(--bg-0)",
+        }}
+      >
+        <Wordmark size={14} />
+        <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
+        <div className="flex flex-col leading-tight">
+          <span className="display" style={{ fontSize: 14, color: "var(--fg-0)" }}>
+            {title || "Interview"}
           </span>
-        )}
-        {notice && <span className="text-xs text-amber-400">{notice}</span>}
+          <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10, letterSpacing: "0.04em" }}>
+            {language}
+            {interviewType ? ` · ${interviewType}` : ""}
+            {joinCode ? ` · session ${joinCode}` : ""}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="mono tabular flex items-center gap-1.5" style={{ color: "var(--fg-2)", fontSize: 12 }}>
+            <Icon name="clock" size={12} color="var(--fg-2)" />
+            {formatElapsed(elapsed)}
+          </span>
+          <span style={{ width: 1, height: 18, background: "var(--line-2)" }} />
+          <Avatar name={defaultName || "candidate"} size={22} />
+          <span style={{ color: "var(--fg-1)", fontSize: 12.5 }}>{defaultName || "candidate"}</span>
+          <button
+            type="button"
+            onClick={() => router.push("/candidate")}
+            className="btn btn-sm"
+          >
+            <Icon name="logout" size={12} /> Leave
+          </button>
+        </div>
       </header>
+
+      {notice && (
+        <div
+          className="flex items-center gap-2"
+          style={{
+            padding: "8px 20px",
+            background: "var(--warn-dim)",
+            borderBottom: "1px solid var(--warn)",
+            color: "var(--warn)",
+            fontSize: 12,
+          }}
+        >
+          <Icon name="warn" size={12} color="var(--warn)" /> {notice}
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal" autoSaveId="interview-candidate-h">
-          <Panel
-            defaultSize={22}
-            minSize={5}
-            collapsible
-            collapsedSize={3}
-            className="overflow-hidden"
-          >
-            <div className="flex h-full flex-col border-r border-neutral-800 bg-neutral-950">
-              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                Problem
+          {/* LEFT — problem statement */}
+          <Panel defaultSize={22} minSize={5} collapsible collapsedSize={3} className="overflow-hidden">
+            <div
+              className="flex h-full flex-col"
+              style={{ borderRight: "1px solid var(--line-1)", background: "var(--bg-0)" }}
+            >
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--line-1)",
+                  background: "var(--bg-1)",
+                }}
+              >
+                <SectionLabel>Problem statement</SectionLabel>
               </div>
-              <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-3 text-sm text-neutral-200">
-                {prompt || <span className="text-neutral-500">(no problem statement)</span>}
+              <div className="flex-1 overflow-y-auto" style={{ padding: 18 }}>
+                {title && (
+                  <h2
+                    className="display"
+                    style={{ fontSize: 22, lineHeight: 1.15, letterSpacing: "-0.01em", color: "var(--fg-0)" }}
+                  >
+                    {title}
+                  </h2>
+                )}
+                {(interviewType || language) && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    {interviewType && <Pill kind="muted">{interviewType}</Pill>}
+                    {language && <Pill kind="signal">{language}</Pill>}
+                  </div>
+                )}
+                <div
+                  className="mt-4 whitespace-pre-wrap"
+                  style={{ fontSize: 13, color: "var(--fg-1)", lineHeight: 1.6 }}
+                >
+                  {prompt || <span style={{ color: "var(--fg-3)" }}>(no problem statement)</span>}
+                </div>
               </div>
             </div>
           </Panel>
-          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
+          <PanelResizeHandle className="acuity-resize-h" />
+
+          {/* CENTER — editor + terminal */}
           <Panel defaultSize={53} minSize={30}>
             <PanelGroup direction="vertical" autoSaveId="interview-candidate-v">
               <Panel defaultSize={70} minSize={20}>
-                <div className="flex h-full flex-col">
-                  <div className="flex items-center gap-3 border-b border-neutral-800 px-3 py-1.5">
-                    <button
-                      type="button"
-                      onClick={runCode}
-                      disabled={running}
-                      className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
-                    >
-                      {running ? "Running..." : "Run"}
-                    </button>
-                    {runResult && runResult.total > 0 && (
-                      <span className="text-xs text-neutral-300">
-                        {runResult.passed}/{runResult.total} tests passed
+                <div className="flex h-full flex-col" style={{ background: "var(--bg-0)" }}>
+                  <div
+                    className="flex items-center justify-between"
+                    style={{ padding: "6px 14px", borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)" }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="live-pulse-dot"
+                        style={{ width: 6, height: 6, animation: "none" }}
+                      />
+                      <span className="mono" style={{ color: "var(--fg-1)", fontSize: 11 }}>
+                        {activePath ?? `solution.${extFor(language)}`}
                       </span>
-                    )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={runCode}
+                        disabled={running}
+                        className="btn btn-primary btn-sm"
+                        aria-disabled={running}
+                      >
+                        {running ? "Running…" : <>Run <span className="mono" style={{ opacity: 0.7 }}>⌘↵</span></>}
+                      </button>
+                      {runResult && runResult.total > 0 && (
+                        <Pill kind={runResult.passed === runResult.total ? "live" : "warn"}>
+                          {runResult.passed}/{runResult.total} tests
+                        </Pill>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-h-0">
                     {hasFiles ? (
                       <MultiFileEditor
                         files={files}
@@ -600,7 +676,7 @@ export default function CandidateSessionPage() {
                   </div>
                 </div>
               </Panel>
-              <PanelResizeHandle className="h-1 bg-neutral-900 transition hover:bg-emerald-700" />
+              <PanelResizeHandle className="acuity-resize-v" />
               <Panel defaultSize={30} minSize={8} collapsible collapsedSize={4}>
                 <CandidateTerminal
                   runResult={runResult}
@@ -613,17 +689,41 @@ export default function CandidateSessionPage() {
               </Panel>
             </PanelGroup>
           </Panel>
-          <PanelResizeHandle className="w-1 bg-neutral-900 transition hover:bg-emerald-700" />
-          <Panel
-            defaultSize={25}
-            minSize={5}
-            collapsible
-            collapsedSize={3}
-            className="overflow-hidden"
-          >
-            <div className="flex h-full flex-col border-l border-neutral-800">
-              <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                AI assistant
+          <PanelResizeHandle className="acuity-resize-h" />
+
+          {/* RIGHT — AI chat */}
+          <Panel defaultSize={25} minSize={5} collapsible collapsedSize={3} className="overflow-hidden">
+            <div
+              className="flex h-full flex-col"
+              style={{ borderLeft: "1px solid var(--line-1)", background: "var(--bg-0)" }}
+            >
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--line-1)",
+                  background: "var(--bg-1)",
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <Aperture size={16} color="var(--live)" />
+                  <span className="display" style={{ fontSize: 16, color: "var(--fg-0)" }}>AI assistant</span>
+                  <Pill kind="muted" className="ml-auto">hints only</Pill>
+                </div>
+                {budget && (
+                  <div className="mt-3">
+                    <div className="mono mb-1 flex items-center justify-between" style={{ fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>
+                      <span>TOKENS</span>
+                      <span className="tabular" style={{ color: "var(--fg-0)" }}>
+                        {budget.used.toLocaleString()} / {budget.budget.toLocaleString()}
+                      </span>
+                    </div>
+                    <Progress
+                      value={budget.used}
+                      max={budget.budget}
+                      color={budget.remaining < budget.budget * 0.15 ? "var(--warn)" : "var(--live)"}
+                    />
+                  </div>
+                )}
               </div>
               <AIInfoHeader
                 model={aiModel}
@@ -639,12 +739,77 @@ export default function CandidateSessionPage() {
                   exhausted={budget !== null && budget.remaining <= 0}
                 />
               </div>
+              <div
+                className="mono"
+                style={{
+                  padding: "8px 14px",
+                  borderTop: "1px solid var(--line-1)",
+                  background: "var(--bg-0)",
+                  color: "var(--fg-3)",
+                  fontSize: 10,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                AI may produce incorrect output — verify before relying on it.
+              </div>
             </div>
           </Panel>
         </PanelGroup>
       </div>
+
       {/* Suppress unused-state warnings; myProfileId is captured into the ref for handlers. */}
       <span hidden>{myProfileId}</span>
+
+      <style jsx global>{`
+        .acuity-resize-h { width: 1px; background: var(--line-1); transition: background 0.12s ease; cursor: col-resize; }
+        .acuity-resize-h:hover { background: var(--live); }
+        .acuity-resize-v { height: 1px; background: var(--line-1); transition: background 0.12s ease; cursor: row-resize; }
+        .acuity-resize-v:hover { background: var(--live); }
+      `}</style>
+    </main>
+  );
+}
+
+function FullscreenMessage({
+  icon,
+  iconBg,
+  iconBorder,
+  title,
+  subtitle,
+  action,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  iconBorder: string;
+  title: string;
+  subtitle: string;
+  action: { label: string; onClick: () => void };
+}) {
+  return (
+    <main className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
+      <span
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 999,
+          background: iconBg,
+          border: `1px solid ${iconBorder}`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {icon}
+      </span>
+      <h1 className="display mt-5" style={{ fontSize: 36, lineHeight: 1.05, letterSpacing: "-0.02em" }}>
+        {title}
+      </h1>
+      <p className="mt-3" style={{ color: "var(--fg-2)", fontSize: 14.5, maxWidth: 460 }}>
+        {subtitle}
+      </p>
+      <button onClick={action.onClick} className="btn btn-primary mt-6">
+        {action.label} <Icon name="arrow-right" size={14} />
+      </button>
     </main>
   );
 }
@@ -655,12 +820,7 @@ interface ShellEntry {
   stderr: string;
 }
 
-// Bottom-of-editor terminal panel. Three tabs:
-//   - Output: stdout/stderr OR results of visible (non-hidden) test cases (from Run button).
-//   - Hidden tests: pass/fail summary only (no inputs/outputs revealed to the candidate).
-//   - Shell: interactive pseudo-shell (ls/cat/run/python/node) over the session's file tree.
-// The "Hidden tests" tab is only shown when at least one hidden test ran. Shell tab is always
-// available. All three share the same CodeSignal-style terminal Panel per the layout brief.
+// Bottom-of-editor terminal panel.
 function CandidateTerminal({
   runResult,
   activeTab,
@@ -679,7 +839,6 @@ function CandidateTerminal({
   const visibleTests = runResult?.results.filter((r) => !r.hidden) ?? [];
   const hiddenTests = runResult?.results.filter((r) => r.hidden) ?? [];
   const hasHidden = hiddenTests.length > 0;
-  // If "hidden" was selected before any hidden test ran, fall back to "visible".
   const showActive = activeTab === "hidden" && !hasHidden ? "visible" : activeTab;
   const hiddenPassed = hiddenTests.filter((r) => r.passed).length;
 
@@ -688,8 +847,6 @@ function CandidateTerminal({
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to the bottom of the shell view as new output streams in (and on first paint
-  // when the user switches to the Shell tab).
   useEffect(() => {
     if (showActive !== "shell") return;
     const el = scrollRef.current;
@@ -705,8 +862,6 @@ function CandidateTerminal({
     setShellInput("");
   }
 
-  // Up/Down arrows scroll the typed-command history (bash-style). Only when the input has
-  // focus; doesn't fire if there's no history.
   function handleShellKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -732,32 +887,26 @@ function CandidateTerminal({
   }
 
   return (
-    <div className="flex h-full flex-col border-t border-neutral-800 bg-black">
-      <div className="flex items-center border-b border-neutral-800 px-2 text-xs font-semibold uppercase tracking-wider">
-        <button
-          type="button"
-          onClick={() => onTabChange("visible")}
-          className={`px-3 py-1.5 ${showActive === "visible" ? "border-b-2 border-emerald-500 text-emerald-300" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+    <div
+      className="flex h-full flex-col"
+      style={{ background: "var(--bg-0)", borderTop: "1px solid var(--line-1)" }}
+    >
+      <div
+        className="flex items-center"
+        style={{ borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)", padding: "0 8px" }}
+      >
+        <TermTab active={showActive === "visible"} onClick={() => onTabChange("visible")} color="var(--live)">
           Output
-        </button>
+        </TermTab>
         {hasHidden && (
-          <button
-            type="button"
-            onClick={() => onTabChange("hidden")}
-            className={`px-3 py-1.5 ${showActive === "hidden" ? "border-b-2 border-amber-400 text-amber-300" : "text-neutral-500 hover:text-neutral-300"}`}
-          >
-            Hidden tests ({hiddenPassed}/{hiddenTests.length})
-          </button>
+          <TermTab active={showActive === "hidden"} onClick={() => onTabChange("hidden")} color="var(--warn)">
+            Tests · {hiddenPassed}/{hiddenTests.length}
+          </TermTab>
         )}
-        <button
-          type="button"
-          onClick={() => onTabChange("shell")}
-          className={`px-3 py-1.5 ${showActive === "shell" ? "border-b-2 border-sky-400 text-sky-300" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+        <TermTab active={showActive === "shell"} onClick={() => onTabChange("shell")} color="var(--signal)">
           Shell
-        </button>
-        <span className="ml-auto py-1.5 text-neutral-500">
+        </TermTab>
+        <span className="mono ml-auto" style={{ color: "var(--fg-3)", fontSize: 10.5, paddingRight: 10 }}>
           {showActive === "shell"
             ? shellBusy
               ? "running…"
@@ -769,35 +918,36 @@ function CandidateTerminal({
                 : ""}
         </span>
       </div>
+
       {(showActive === "visible" || showActive === "hidden") && (
-        <div className="flex-1 overflow-auto p-2 font-mono text-xs">
+        <div className="mono flex-1 overflow-auto" style={{ padding: 10, fontSize: 12 }}>
           {!runResult && (
-            <span className="text-neutral-600">Click Run to execute your code.</span>
+            <span style={{ color: "var(--fg-3)" }}>Click Run to execute your code.</span>
           )}
           {runResult && runResult.total === 0 && (
-            <pre className="whitespace-pre-wrap text-neutral-300">
+            <pre className="whitespace-pre-wrap" style={{ color: "var(--fg-0)" }}>
               {runResult.stdout || runResult.stderr || "(no output)"}
             </pre>
           )}
           {runResult && runResult.total > 0 && showActive === "visible" && (
             <>
               {visibleTests.length === 0 && (
-                <span className="text-neutral-500">
-                  All tests for this run are hidden — see the Hidden tests tab for pass/fail.
+                <span style={{ color: "var(--fg-3)" }}>
+                  All tests for this run are hidden — see the Tests tab for pass/fail.
                 </span>
               )}
               <ul className="space-y-1">
                 {visibleTests.map((r, i) => (
                   <li key={i}>
-                    <span className={r.passed ? "text-emerald-400" : "text-red-400"}>
+                    <span style={{ color: r.passed ? "var(--live)" : "var(--bad)" }}>
                       {r.passed ? "✓" : "✗"} {r.name}
                     </span>
                     {!r.passed && (
-                      <div className="ml-4 text-neutral-500">
-                        expected <code className="text-neutral-300">{r.expected}</code>, got{" "}
-                        <code className="text-neutral-300">{r.actual}</code>
+                      <div className="ml-4" style={{ color: "var(--fg-3)" }}>
+                        expected <code style={{ color: "var(--fg-1)" }}>{r.expected}</code>, got{" "}
+                        <code style={{ color: "var(--fg-1)" }}>{r.actual}</code>
                         {r.stderr && (
-                          <pre className="whitespace-pre-wrap text-red-400">{r.stderr}</pre>
+                          <pre className="whitespace-pre-wrap" style={{ color: "var(--bad)" }}>{r.stderr}</pre>
                         )}
                       </div>
                     )}
@@ -810,10 +960,10 @@ function CandidateTerminal({
             <ul className="space-y-1">
               {hiddenTests.map((r, i) => (
                 <li key={i}>
-                  <span className={r.passed ? "text-emerald-400" : "text-red-400"}>
+                  <span style={{ color: r.passed ? "var(--live)" : "var(--bad)" }}>
                     {r.passed ? "✓" : "✗"} {r.name}
                   </span>
-                  <span className="text-neutral-500"> (hidden — details withheld)</span>
+                  <span style={{ color: "var(--fg-3)" }}> (hidden — details withheld)</span>
                 </li>
               ))}
             </ul>
@@ -824,43 +974,51 @@ function CandidateTerminal({
         <div className="flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
-            className="flex-1 overflow-auto p-2 font-mono text-xs"
+            className="mono flex-1 overflow-auto"
+            style={{ padding: 10, fontSize: 12 }}
             onClick={() => {
-              // Clicking anywhere in the scrollback focuses the input below.
-              const input = document.getElementById("devlens-shell-input");
+              const input = document.getElementById("acuity-shell-input");
               if (input instanceof HTMLInputElement) input.focus();
             }}
           >
             {shellHistory.length === 0 && !shellBusy && (
-              <div className="text-neutral-600">
-                Interactive terminal. Type <code className="text-neutral-300">help</code> to see
+              <div style={{ color: "var(--fg-3)" }}>
+                Interactive terminal. Type <code style={{ color: "var(--fg-1)" }}>help</code> to see
                 available commands. Use ↑/↓ for command history.
               </div>
             )}
             {shellHistory.map((entry, i) => (
               <div key={i} className="mb-2">
-                <div className="text-neutral-400">
-                  <span className="text-sky-400">$</span> {entry.command}
+                <div style={{ color: "var(--fg-2)" }}>
+                  <span style={{ color: "var(--signal)" }}>$</span> {entry.command}
                 </div>
                 {entry.stdout && (
-                  <pre className="whitespace-pre-wrap text-neutral-200">{entry.stdout}</pre>
+                  <pre className="whitespace-pre-wrap" style={{ color: "var(--fg-0)" }}>{entry.stdout}</pre>
                 )}
                 {entry.stderr && (
-                  <pre className="whitespace-pre-wrap text-red-400">{entry.stderr}</pre>
+                  <pre className="whitespace-pre-wrap" style={{ color: "var(--bad)" }}>{entry.stderr}</pre>
                 )}
               </div>
             ))}
             {shellBusy && (
-              <div className="text-neutral-500">
-                <span className="text-sky-400">$</span> {shellInput}
+              <div style={{ color: "var(--fg-3)" }}>
+                <span style={{ color: "var(--signal)" }}>$</span> {shellInput}
                 <span className="animate-pulse"> running…</span>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 border-t border-neutral-900 px-2 py-1 font-mono text-xs">
-            <span className="text-sky-400">$</span>
+          <div
+            className="mono flex items-center gap-2"
+            style={{
+              borderTop: "1px solid var(--line-1)",
+              padding: "6px 10px",
+              fontSize: 12,
+              background: "var(--bg-0)",
+            }}
+          >
+            <span style={{ color: "var(--signal)" }}>$</span>
             <input
-              id="devlens-shell-input"
+              id="acuity-shell-input"
               type="text"
               value={shellInput}
               onChange={(e) => setShellInput(e.target.value)}
@@ -868,7 +1026,15 @@ function CandidateTerminal({
               disabled={shellBusy}
               autoComplete="off"
               spellCheck={false}
-              className="flex-1 bg-transparent text-neutral-100 outline-none placeholder:text-neutral-700 disabled:opacity-50"
+              style={{
+                flex: 1,
+                background: "transparent",
+                color: "var(--fg-0)",
+                border: "none",
+                outline: "none",
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+              }}
               placeholder={shellBusy ? "" : "type a command and press Enter…"}
             />
           </div>
@@ -876,4 +1042,55 @@ function CandidateTerminal({
       )}
     </div>
   );
+}
+
+function TermTab({
+  active,
+  onClick,
+  color,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mono"
+      style={{
+        padding: "8px 12px",
+        background: "transparent",
+        color: active ? "var(--fg-0)" : "var(--fg-3)",
+        fontSize: 11,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        border: "none",
+        borderBottom: `2px solid ${active ? color : "transparent"}`,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function extFor(language: string): string {
+  return ({
+    python: "py",
+    javascript: "js",
+    typescript: "ts",
+    java: "java",
+    cpp: "cpp",
+    go: "go",
+    sql: "sql",
+  } as Record<string, string>)[language] ?? "txt";
 }

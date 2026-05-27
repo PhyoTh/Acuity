@@ -4,7 +4,12 @@ Guidance for Claude (and any coding agent) working in this repo. For the **roadm
 decisions, data model, and task list**, read [plan.md](plan.md) — it is the source of truth and is
 not duplicated here.
 
-## What DevLens is
+## What Acuity is
+
+> **Renamed 2026-05-26:** DevLens → **Acuity**. The repo directory is still `DevLens/` (renaming
+> a checked-out repo on disk is a per-developer chore), but everywhere the product is referenced
+> in code, copy, and docs it is now **Acuity**. The full UI design-system overhaul that
+> accompanies the rename lives in [ROADMAP.md](ROADMAP.md).
 
 A live technical-interview platform: a candidate codes in a Monaco IDE with an embedded AI
 assistant; an interviewer watches a hidden real-time telemetry + scorecard dashboard. The
@@ -26,7 +31,7 @@ whether candidates *critically evaluate* AI output instead of copying it. Origin
 ## Terminology (renamed 2026-05-26)
 
 - "Recruiter" → **interviewer** everywhere (role enum, UI copy, code identifiers).
-- "Room" → **session** everywhere (DB tables, URLs, types, vars). A DevLens *session* is one
+- "Room" → **session** everywhere (DB tables, URLs, types, vars). An Acuity *session* is one
   interview run — its problem, AI config, transcripts, events, files, and scorecard.
 
 Migration order (apply all seven with `uv run alembic upgrade head`):
@@ -68,13 +73,17 @@ DevLens/
 │   │   ├── interview/[sessionId]/        # candidate IDE view
 │   │   └── join/[code]/                  # candidate invite entry point
 │   ├── components/
+│   │   ├── ui/                           # Acuity design-system primitives (Aperture,
+│   │   │                                 # Wordmark, Pill, Sparkline, SectionLabel, Card,
+│   │   │                                 # Stat, Avatar, Icon, CodeBlock, HeatStrip, Progress)
 │   │   ├── CreateSessionForm.tsx         # 4-step wizard incl. drag-drop file/folder upload
 │   │   ├── DisplayNameModal.tsx          # per-session display-name gate
 │   │   ├── Chat/{ChatBox,AIInfoHeader}.tsx
 │   │   ├── Editor/{CodeEditor,FileTree,MultiFileEditor}.tsx
 │   │   └── Dashboard/{Scorecard,SummaryView,ParticipantsPopover,ReplayTimeline}.tsx
-│   ├── app/globals.css          # incl. markdown-body + remote-cursor decoration styles
-│   └── lib/                     # supabase.ts, ws.ts (SessionSocket), api.ts, types.ts
+│   ├── app/globals.css          # design tokens + markdown-body + remote-cursor styles
+│   └── lib/                     # supabase.ts, ws.ts (SessionSocket), api.ts, types.ts,
+│                                # mocks.ts (mock data for unwired UI surfaces)
 └── backend/                     # FastAPI app
     └── app/
         ├── main.py              # app factory + /health
@@ -156,6 +165,19 @@ secret must stay server-side; only `NEXT_PUBLIC_*` vars reach the browser.
   **mypy**. Match surrounding code; keep modules small and single-purpose.
 - **Secrets & model:** all LLM calls go through Claude via `langchain-anthropic`; the model id is
   env-driven (`ANTHROPIC_MODEL`).
+- **UI / design system (Acuity):** colors are OKLCH custom properties on `:root` in
+  `app/globals.css` — use `var(--bg-1)`, `var(--live)`, etc. Tailwind utilities are still
+  used for layout/spacing; do NOT reintroduce ad-hoc neutral-/zinc- palette colors (the old
+  DevLens look). Three fonts are loaded via `next/font/google` in `app/layout.tsx`:
+  **Instrument Serif** (display), **Geist** (body/UI), **JetBrains Mono** (code, IDs,
+  ALL-CAPS section labels). Use the `components/ui/` primitives instead of hand-rolling
+  pills, cards, etc.
+- **Mock vs live data:** anything the roadmap depicts that doesn't have a backend yet
+  (dashboard stats, activity feed, scheduling, share-link, export PDF, etc. — see plan.md §9b
+  for the full list) is rendered from `lib/mocks.ts` with no live fetch. Treat that file as
+  "to be wired up later"; do not pretend a card is live when it isn't. **Real data flows
+  (auth, WS sync, code execution, scorecard) must remain untouched** — the overhaul is
+  visual, not behavioral.
 
 ## Architecture notes
 
