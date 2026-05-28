@@ -44,7 +44,13 @@ export function Hero() {
         padding: "80px 48px 64px",
       }}
     >
-      <div className="grid gap-16" style={{ gridTemplateColumns: "1.05fr 1fr" }}>
+      {/* `items-start` so the demo card stays content-sized — without it the card stretches
+          to match the height of the left text column, leaving a big empty void under the
+          footer strip. */}
+      <div
+        className="grid gap-16 items-start"
+        style={{ gridTemplateColumns: "1.05fr 1fr" }}
+      >
         {/* LEFT — copy + CTA */}
         <div>
           <h1

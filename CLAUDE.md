@@ -146,9 +146,20 @@ secret must stay server-side; only `NEXT_PUBLIC_*` vars reach the browser.
 - **Initial WS state must be sent directly to the new socket,** *not* via the Redis channel.
   `pubsub.subscribe()` is async — a `publish()` immediately after `asyncio.create_task(...)`
   for the listener can fire before the listener has subscribed, so the connecting socket
-  misses its own snapshot. `ws.py` sends `participants` + `token_budget` directly with
-  `websocket.send_json(...)`; updates that need to fan out (e.g. someone joined) still
-  `publish()` to the channel.
+  misses its own snapshot. `ws.py` sends `participants` + `token_budget` + the latest
+  `code_change` snapshot directly with `websocket.send_json(...)`; updates that need to fan
+  out (e.g. someone joined) still `publish()` to the channel.
+- **Presence is Redis-tracked, not DB-tracked.** `session_participants` rows persist forever
+  once a candidate has been added; "is this person currently in the room?" lives in the
+  Redis set `connected:{session_id}` (SADD on WS accept, SREM in the WS handler's
+  `finally`). The `participants` payload carries `connected: bool` from this set so the
+  interviewer's panel updates the moment a tab closes. **Do not** add a `left_at` column
+  or similar — re-joining a session with the same DB row is intentional.
+- **Candidate-side `code_change` echoes are ignored.** The backend broadcasts every
+  `code_change` to all channel subscribers including the originator. The candidate's
+  frontend handles only the FIRST `code_change` it receives (the rejoin snapshot the
+  server sends on connect), via an `initialCodeAppliedRef`. Subsequent ones are dropped
+  to avoid stomping the candidate's in-flight typing.
 - **Migrations:** schema changes go through Alembic (`autogenerate` from `db/models.py`), never
   hand-edited SQL. This keeps two devs' schema changes ordered and reviewable. The rename
   migration `0003_rename_room_to_session` is the one exception (hand-written because it renames

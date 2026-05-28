@@ -413,8 +413,6 @@ export default function InterviewerSessionPage() {
             <PanelSidebar
               prompt={prompt}
               interviewType={interviewType}
-              language={language}
-              hallucinationPct={hallucinationPct}
               pasteCount={pasteCount}
               tabSwitchCount={tabSwitchCount}
               budget={budget}
@@ -670,8 +668,6 @@ function TerminalTab({
 function PanelSidebar({
   prompt,
   interviewType,
-  language,
-  hallucinationPct,
   pasteCount,
   tabSwitchCount,
   budget,
@@ -679,8 +675,6 @@ function PanelSidebar({
 }: {
   prompt: string;
   interviewType: string;
-  language: string;
-  hallucinationPct: number;
   pasteCount: number;
   tabSwitchCount: number;
   budget: { used: number; budget: number; remaining: number } | null;
@@ -698,8 +692,6 @@ function PanelSidebar({
         <SectionLabel>Problem</SectionLabel>
         <div className="flex items-center gap-1.5">
           {interviewType && <Pill kind="muted">{interviewType}</Pill>}
-          {language && <Pill kind="signal">{language}</Pill>}
-          {hallucinationPct > 0 && <Pill kind="warn">halluc {hallucinationPct}%</Pill>}
         </div>
       </div>
       <div className="flex-1 overflow-y-auto" style={{ padding: 14 }}>
