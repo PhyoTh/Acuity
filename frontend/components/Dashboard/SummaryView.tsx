@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import ChatBox, { type ChatMessage } from "@/components/Chat/ChatBox";
 import ReplayTimeline from "@/components/Dashboard/ReplayTimeline";
@@ -73,12 +75,21 @@ export default function SummaryView({
 
   // Heuristic chips derived from scorecard.scores (no separate backend field for them yet).
   // See plan.md §9b — per-dimension justifications + structured tags are visual-only.
+  const hallucinationTotal = transcripts.filter(
+    (t) => t.role === "assistant" && t.was_hallucinated,
+  ).length;
   const chips: { kind: "live" | "warn" | "signal"; label: string }[] = [];
   if (scorecard) {
     const s = scorecard.scores;
-    if ((s.approach_independence ?? 0) >= 8) chips.push({ kind: "live",   label: "Independent debugger" });
-    if ((s.caught_ai_errors    ?? 0) >= 6) chips.push({ kind: "warn",   label: `Caught ${Math.round((s.caught_ai_errors ?? 0) * 0.4)}/4 hallucinations` });
-    if ((s.prompt_quality      ?? 0) >= 8) chips.push({ kind: "signal", label: "Clean prompt habits" });
+    if ((s.approach_independence ?? 0) >= 8) chips.push({ kind: "live", label: "Independent debugger" });
+    if (hallucinationTotal > 0 && (s.caught_ai_errors ?? 0) >= 6) {
+      const caught = Math.min(
+        hallucinationTotal,
+        Math.round(((s.caught_ai_errors ?? 0) / 10) * hallucinationTotal),
+      );
+      chips.push({ kind: "warn", label: `Caught ${caught}/${hallucinationTotal} hallucinations` });
+    }
+    if ((s.prompt_quality ?? 0) >= 8) chips.push({ kind: "signal", label: "Clean prompt habits" });
   }
 
   // Pick the "key turns" — first user prompt, first hallucinated AI turn, etc. Best-effort
@@ -356,12 +367,23 @@ export default function SummaryView({
                             {t.role === "assistant" ? (t.was_hallucinated ? "ai · corrupted" : "ai") : "candidate"}
                           </span>
                         </div>
-                        <div
-                          className="whitespace-pre-wrap"
-                          style={{ color: "var(--fg-1)", lineHeight: 1.5 }}
-                        >
-                          {truncate(t.content, 220)}
-                        </div>
+                        {t.role === "assistant" ? (
+                          <div
+                            className="markdown-body"
+                            style={{ color: "var(--fg-1)", lineHeight: 1.5 }}
+                          >
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {truncate(t.content, 600)}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div
+                            className="whitespace-pre-wrap"
+                            style={{ color: "var(--fg-1)", lineHeight: 1.5 }}
+                          >
+                            {truncate(t.content, 220)}
+                          </div>
+                        )}
                       </div>
                     </li>
                   ))}
