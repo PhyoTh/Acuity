@@ -201,43 +201,74 @@ function CandidateRow({
       : session.status === "pending"
       ? "signal"
       : "muted";
+  const isActive = session.status === "active";
   return (
     <div
-      className="grid items-center gap-3"
       style={{
-        gridTemplateColumns: "auto 1fr auto auto",
         padding: "14px 18px",
         borderBottom: divider ? "1px solid var(--line-1)" : "none",
       }}
     >
-      <span
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 8,
-          background: "var(--bg-2)",
-          border: "1px solid var(--line-1)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+      <div
+        className="grid items-center gap-3"
+        style={{ gridTemplateColumns: "auto 1fr auto auto" }}
       >
-        <Icon name="code" size={14} color="var(--fg-1)" />
-      </span>
-      <div className="min-w-0">
-        <div style={{ color: "var(--fg-0)", fontSize: 13.5 }}>{typeLabel}</div>
-        <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, marginTop: 2 }}>
-          {created.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-          {" · "}
-          {created.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+        <span
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            background: "var(--bg-2)",
+            border: "1px solid var(--line-1)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon name="code" size={14} color="var(--fg-1)" />
+        </span>
+        <div className="min-w-0">
+          <div style={{ color: "var(--fg-0)", fontSize: 13.5 }}>{typeLabel}</div>
+          <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, marginTop: 2 }}>
+            {created.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+            {" · "}
+            {created.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+          </div>
         </div>
+        <Pill kind={statusKind} pulse={isActive}>
+          {session.status}
+        </Pill>
+        <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
+          #{String(index).padStart(4, "0")}
+        </span>
       </div>
-      <Pill kind={statusKind} pulse={session.status === "active"}>
-        {session.status}
-      </Pill>
-      <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5 }}>
-        #{String(index).padStart(4, "0")}
-      </span>
+      {isActive && (
+        // Active = the interview is still running but the candidate isn't currently in the
+        // IDE. Tell them they can rejoin via the original invite link the interviewer sent,
+        // not by clicking here — that would bypass the admit flow.
+        <div
+          className="flex items-start gap-2"
+          style={{
+            marginTop: 10,
+            marginLeft: 48,
+            padding: "8px 12px",
+            background: "var(--live-dim)",
+            border: "1px dashed var(--live)",
+            borderRadius: "var(--radius)",
+            fontSize: 12,
+            color: "var(--fg-1)",
+            lineHeight: 1.5,
+          }}
+        >
+          <Icon name="sparkle" size={12} color="var(--live)" />
+          <span>
+            This session is still running. To return, open the original invite link your
+            interviewer sent you (
+            <span className="mono" style={{ color: "var(--fg-2)" }}>acuity.app/join/XXXXXXXX</span>
+            ).
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -367,6 +367,24 @@ Tracking here so the next pass doesn't lose them:
   honest. Adds a column + a job that flips `pending → active` at the scheduled time and
   emails the candidate.
 
+### 9c-bis. WS presence + rejoin rehydrate (implemented 2026-05-27)
+
+Two coupled fixes to make `Leave / rejoin` work the way users expect:
+
+- **Presence-tracked participants** — `routers/ws.py` now `SADD`s the caller's profile to
+  `connected:{session_id}` on accept and `SREM`s it in the `finally` block, then
+  rebroadcasts `participants`. The payload gains a `connected: bool` per row, and
+  `ParticipantsPopover` shows the count of admitted *and* connected participants (not
+  everyone who ever joined). Disconnected rows are greyed out and tagged `· left`.
+- **Latest-code rehydrate** — on every WS accept the server reads the most recent
+  `code_change` event from `events` and sends it directly to the new socket as a
+  `code_change` payload. The candidate's frontend applies this exactly once (`initialCode
+  AppliedRef`), then ignores subsequent `code_change` echoes of its own typing. Result: a
+  candidate who closes their tab and opens the invite link again sees the live buffer
+  instead of the original `starting_code`.
+
+No DB migration — Redis only.
+
 ### 9d. Settings panel (planned)
 
 `/dashboard` will get a new "Settings" nav item replacing the current Anthropic-key card

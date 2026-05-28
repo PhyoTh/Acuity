@@ -32,6 +32,7 @@ from sqlalchemy import delete, select
 
 from app.db.base import SessionLocal
 from app.db.models import (
+    Event,
     InterviewSession,
     Profile,
     SessionFile,
@@ -54,9 +55,44 @@ def _tokens_key(session_id: str) -> str:
     return f"tokens:{session_id}:total"
 
 
+def _connected_key(session_id: str) -> str:
+    """Redis set of profile_ids currently holding an open WS to this session. Used so the
+    participants payload can carry a `connected` flag — when the candidate closes their tab the
+    interviewer's panel updates without waiting for a DB-level "left" state."""
+    return f"connected:{session_id}"
+
+
 async def _tokens_used(session_id: str) -> int:
     raw = await get_redis().get(_tokens_key(session_id))
     return int(raw) if raw else 0
+
+
+async def _connected_profile_ids(session_id: str) -> set[str]:
+    # redis-py async stubs make these methods read as `Awaitable[X] | X` because the same
+    # class is used for sync+async. We're using `redis.asyncio` so the await is correct.
+    raw = await get_redis().smembers(_connected_key(session_id))  # type: ignore[misc]
+    return {(v.decode() if isinstance(v, bytes) else v) for v in raw}
+
+
+async def _latest_code(session_id: uuid.UUID) -> dict[str, Any] | None:
+    """Most recent `code_change` payload for this session (single-file mode). Lets rejoiners
+    see the live buffer instead of the original starting_code. Multi-file projects already
+    rehydrate from `session_files`, so this only matters when `hasFiles` is false."""
+    async with SessionLocal() as db:
+        row = await db.scalar(
+            select(Event)
+            .where(Event.session_id == session_id, Event.type == "code_change")
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+    if row is None:
+        return None
+    payload = row.payload or {}
+    if not isinstance(payload, dict):
+        return None
+    # Defensive: only forward `code` + `language` — never echo back a `cursor` field that
+    # would teleport the user's caret.
+    return {k: payload[k] for k in ("code", "language") if k in payload}
 
 
 async def _broadcast_budget(channel: str, session_id: str, budget: int) -> None:
@@ -91,7 +127,13 @@ async def _is_admitted(session_id: uuid.UUID, profile_id: uuid.UUID) -> bool:
 
 
 async def _participants_payload(session_id: uuid.UUID) -> list[dict[str, Any]]:
-    """List participants with names — fed to both sides for the dashboard's participant panel."""
+    """List participants with names — fed to both sides for the dashboard's participant panel.
+
+    Each row carries `connected: bool` — true iff a WebSocket is currently open from that
+    profile. The frontend uses this to grey-out (or hide) participants who joined but later
+    closed their tab; the canonical "is admitted" state still lives in the DB.
+    """
+    connected = await _connected_profile_ids(str(session_id))
     async with SessionLocal() as db:
         rows = (
             await db.execute(
@@ -112,6 +154,7 @@ async def _participants_payload(session_id: uuid.UUID) -> list[dict[str, Any]]:
             "role": role.value,
             "admitted": bool(admitted),
             "display_name": name or "(unnamed)",
+            "connected": str(pid) in connected,
         }
         for pid, role, admitted, name in rows
     ]
@@ -292,6 +335,11 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     channel = session_channel(session_id)
     listener = asyncio.create_task(_pump_redis_to_ws(channel, websocket, is_interviewer))
 
+    # Mark this profile as connected BEFORE building the participants snapshot so the
+    # client sees its own `connected: true` row immediately. Using a Redis SET keeps this
+    # idempotent — a candidate who briefly reconnects in a new tab won't be double-counted.
+    await get_redis().sadd(_connected_key(session_id), profile_id)  # type: ignore[misc]
+
     # Direct snapshot to this socket — does NOT go through Redis pub/sub. Sending via publish has
     # a race: `pubsub.subscribe()` is async and the listener task may not be subscribed yet when
     # the publish fires, so the connecting socket misses its own snapshot. (This is the bug where
@@ -303,6 +351,12 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     await websocket.send_json(
         {"type": "participants", "payload": {"participants": participants}}
     )
+    # Re-hydrate the candidate's editor with the latest code from the event log so a refresh
+    # or accidental tab-close doesn't lose their work. Multi-file sessions already rehydrate
+    # from `session_files`; this only fires for single-file mode.
+    latest = await _latest_code(session_uuid)
+    if latest is not None:
+        await websocket.send_json({"type": "code_change", "payload": latest})
     if initial_budget > 0:
         used = await _tokens_used(session_id)
         await websocket.send_json(
@@ -333,7 +387,12 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
         pass
     finally:
         listener.cancel()
+        # SREM + rebroadcast so the other side sees the candidate disappear in real time.
+        # Without this the participants list still showed everyone who'd ever joined, even
+        # after they closed their tab — see plan.md §7c notes.
+        await get_redis().srem(_connected_key(session_id), profile_id)  # type: ignore[misc]
         await publish(channel, {"type": "presence", "payload": {actor: False}})
+        await _broadcast_participants(channel, session_uuid)
 
 
 async def _handle_client_message(

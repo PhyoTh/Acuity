@@ -72,6 +72,7 @@ export default function CandidateSessionPage() {
   const [interviewType, setInterviewType] = useState<string>("");
   const [createdAt, setCreatedAt] = useState<string>("");
   const [elapsed, setElapsed] = useState(0);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   const [files, setFiles] = useState<MultiFile[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -84,6 +85,10 @@ export default function CandidateSessionPage() {
   const myProfileIdRef = useRef<string | null>(null);
   const lastCursorSendRef = useRef<number>(0);
   const fileSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // The backend sends one `code_change` event right after WS connect (the latest snapshot
+  // from the event log). Apply that to repopulate the editor on rejoin, but ignore any
+  // subsequent `code_change` events — those are echoes of the candidate's own typing.
+  const initialCodeAppliedRef = useRef(false);
 
   // Live timer counts up from createdAt.
   useEffect(() => {
@@ -173,6 +178,23 @@ export default function CandidateSessionPage() {
     let active = true;
 
     function handleEvent(e: SessionEvent) {
+      if (e.type === "code_change") {
+        // Only honor the first code_change — the rejoin snapshot. After that, the candidate
+        // is the editor of record and any incoming code_change is just an echo of their own
+        // typing being rebroadcast through Redis.
+        if (initialCodeAppliedRef.current) return;
+        initialCodeAppliedRef.current = true;
+        const p = e.payload as { code?: string; language?: string };
+        if (typeof p.code === "string") {
+          setCode(p.code);
+          codeRef.current = p.code;
+        }
+        if (p.language) {
+          setLanguage(p.language);
+          languageRef.current = p.language;
+        }
+        return;
+      }
       if (e.type === "ai_response") {
         const p = e.payload as { content: string };
         setMessages((m) => [...m, { role: "assistant", content: p.content }]);
@@ -545,7 +567,7 @@ export default function CandidateSessionPage() {
           <span style={{ color: "var(--fg-1)", fontSize: 12.5 }}>{defaultName || "candidate"}</span>
           <button
             type="button"
-            onClick={() => router.push("/candidate")}
+            onClick={() => setLeaveConfirmOpen(true)}
             className="btn btn-sm"
           >
             <Icon name="logout" size={12} /> Leave
@@ -594,10 +616,9 @@ export default function CandidateSessionPage() {
                     {title}
                   </h2>
                 )}
-                {(interviewType || language) && (
+                {interviewType && (
                   <div className="mt-2 flex items-center gap-1.5">
-                    {interviewType && <Pill kind="muted">{interviewType}</Pill>}
-                    {language && <Pill kind="signal">{language}</Pill>}
+                    <Pill kind="muted">{interviewType}</Pill>
                   </div>
                 )}
                 <div
@@ -759,6 +780,47 @@ export default function CandidateSessionPage() {
 
       {/* Suppress unused-state warnings; myProfileId is captured into the ref for handlers. */}
       <span hidden>{myProfileId}</span>
+
+      {leaveConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "oklch(0 0 0 / 0.65)", backdropFilter: "blur(2px)", padding: 16 }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              background: "var(--bg-1)",
+              border: "1px solid var(--line-1)",
+              borderRadius: "var(--radius-lg)",
+              padding: 24,
+              boxShadow: "0 24px 48px -16px black",
+            }}
+          >
+            <SectionLabel>Leave interview</SectionLabel>
+            <h2 className="display mt-2" style={{ fontSize: 24 }}>Leave this interview?</h2>
+            <p className="mt-3" style={{ color: "var(--fg-2)", fontSize: 13.5, lineHeight: 1.55 }}>
+              The session stays live for the interviewer. You can return any time using the
+              original invite link — your code and chat history will pick up where you left off.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setLeaveConfirmOpen(false)} className="btn">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeaveConfirmOpen(false);
+                  router.push("/candidate");
+                }}
+                className="btn btn-danger"
+              >
+                Yes, leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         .acuity-resize-h { width: 1px; background: var(--line-1); transition: background 0.12s ease; cursor: col-resize; }
