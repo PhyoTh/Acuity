@@ -5,6 +5,7 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { Aperture, Icon, SectionLabel, Wordmark } from "@/components/ui";
 import { api } from "@/lib/api";
+import { DEMO_MODE, demoLogin, getSession } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/client";
 
 // Candidate invite entry point. If already signed in, joins immediately; otherwise lets the
@@ -24,8 +25,10 @@ export default function JoinPage() {
     setBusy(true);
     setError(null);
     try {
-      const { session_id } = await api.joinSession(code);
-      router.push(`/interview/${session_id}`);
+      const { session_id, role } = await api.joinSession(code);
+      // Role is bound to the link by the backend: an interviewer co-host link lands on the
+      // dashboard mirror; a candidate invite link lands in the IDE.
+      router.push(role === "interviewer" ? `/dashboard/${session_id}` : `/interview/${session_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not join session");
       setBusy(false);
@@ -33,14 +36,24 @@ export default function JoinPage() {
   }, [code, router]);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
+    (async () => {
+      if (await getSession()) {
         void join();
-      } else {
-        setNeedsAuth(true);
+        return;
       }
-    });
+      if (DEMO_MODE) {
+        // No account needed in demo mode — mint a candidate identity and join straight in.
+        try {
+          await demoLogin("candidate");
+          void join();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Demo login failed");
+          setNeedsAuth(true);
+        }
+        return;
+      }
+      setNeedsAuth(true);
+    })();
   }, [join]);
 
   async function authenticate(e: FormEvent, mode: "signup" | "signin") {
@@ -70,6 +83,40 @@ export default function JoinPage() {
   }
 
   if (!needsAuth) {
+    // Rejected (e.g. wrong link for this account type) — show a clear message instead of an
+    // indefinite spinner.
+    if (error) {
+      return (
+        <main className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
+          <span
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 999,
+              background: "var(--bad-dim)",
+              border: "1px solid var(--bad)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="x" size={26} color="var(--bad)" strokeWidth={2.2} />
+          </span>
+          <h1 className="display mt-5" style={{ fontSize: 34, lineHeight: 1.05, letterSpacing: "-0.02em" }}>
+            Can&apos;t join this session
+          </h1>
+          <p className="mt-3" style={{ color: "var(--fg-2)", fontSize: 14, maxWidth: 440 }}>
+            {error}
+          </p>
+          <a href="/login" className="btn btn-sm mt-6">
+            Go to login <Icon name="arrow-right" size={13} />
+          </a>
+          <p className="mono mt-4" style={{ color: "var(--fg-3)", fontSize: 11, letterSpacing: "0.06em" }}>
+            session · {code}
+          </p>
+        </main>
+      );
+    }
     return (
       <main className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
         <span className="live-pulse-dot" style={{ width: 14, height: 14 }} />
@@ -79,9 +126,6 @@ export default function JoinPage() {
         <p className="mono mt-3" style={{ color: "var(--fg-3)", fontSize: 11, letterSpacing: "0.06em" }}>
           session · {code}
         </p>
-        {error && (
-          <p className="mono mt-4" style={{ color: "var(--bad)", fontSize: 12 }}>{error}</p>
-        )}
       </main>
     );
   }

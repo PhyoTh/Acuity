@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMes
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from app.config import get_settings
 from app.services.llm import cached_system_message, get_chat_model, message_text
 
 # How many prior turns to send back to the model (cost control).
@@ -76,6 +77,9 @@ async def generate_reply(
     Tokens used = input_tokens + output_tokens reported by Anthropic for this single call. The
     caller (ws.py) accumulates this in Redis against the session's `token_budget`.
     """
+    if get_settings().demo_mode:
+        return _demo_reply(query=query, language=language), 120
+
     messages: list[AnyMessage] = [cached_system_message(system_prompt)]
     for role, content in history[-_HISTORY_LIMIT:]:
         messages.append(
@@ -107,3 +111,20 @@ async def generate_reply(
     state = await _get_graph().ainvoke({"messages": messages})
     last = state["messages"][-1]
     return message_text(last), _usage_tokens(last)
+
+
+# Demo response marker (in the language's comment style) so a corrupting hallucinator pass has a
+# deterministic line to mutate (see hallucinator._demo_corrupt).
+_DEMO_SNIPPET = "result = total // count  # average"
+
+
+def _demo_reply(*, query: str, language: str) -> str:
+    """Canned, deterministic assistant reply for DEMO_MODE (no Anthropic call)."""
+    q = query.strip() or "your question"
+    return (
+        f"Good question about **{q[:80]}**. A clean way to approach this in {language} is to "
+        "break it into a small helper and handle the edge cases first. For example:\n\n"
+        f"```{language}\n{_DEMO_SNIPPET}\nreturn result\n```\n\n"
+        "Walk through it with an empty input and a single-element input to convince yourself "
+        "it holds. *(Demo mode: this is a canned response — no live model was called.)*"
+    )

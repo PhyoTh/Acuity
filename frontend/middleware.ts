@@ -3,6 +3,46 @@ import { NextResponse, type NextRequest } from "next/server";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+const DEMO_COOKIE = "acuity_demo_token";
+
+// Decode a JWT payload (base64url) without verifying — used only to read the role for routing.
+function demoRole(token: string | undefined): string | null {
+  if (!token) return null;
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = part.padEnd(Math.ceil(part.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded)) as { user_metadata?: { role?: string } };
+    return payload.user_metadata?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Same role-routing rules as the live path, but reading the demo cookie instead of Supabase.
+function demoMiddleware(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const role = demoRole(request.cookies.get(DEMO_COOKIE)?.value);
+  const needsAuth =
+    path.startsWith("/dashboard") ||
+    path.startsWith("/interview") ||
+    path.startsWith("/candidate");
+
+  if (needsAuth && !role) return NextResponse.redirect(new URL("/login", request.url));
+  if (path.startsWith("/dashboard") && role !== "interviewer")
+    return NextResponse.redirect(new URL("/candidate", request.url));
+  if (path.startsWith("/candidate") && role !== "candidate")
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (role && (path === "/" || path === "/login" || path === "/signup")) {
+    const home = role === "interviewer" ? "/dashboard" : "/candidate";
+    return NextResponse.redirect(new URL(home, request.url));
+  }
+
+  const response = NextResponse.next({ request });
+  if (needsAuth) response.headers.set("Cache-Control", "no-store, must-revalidate");
+  return response;
+}
+
 // Refreshes the Supabase session cookie on every request and enforces role-based routing:
 //   - /dashboard*  -> interviewers only
 //   - /candidate*  -> candidates only
@@ -12,6 +52,8 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 //                           browser "back" button can't leave them stranded on a public/auth
 //                           page after they've logged in
 export async function middleware(request: NextRequest) {
+  if (DEMO_MODE) return demoMiddleware(request);
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

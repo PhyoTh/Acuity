@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # CORS
     frontend_origin: str = "http://localhost:3000"
 
+    # Demo / reviewer mode — when true the app runs with NO external credentials: the LLM
+    # services return canned deterministic responses (no Anthropic key needed) and auth accepts
+    # demo tokens signed with `demo_jwt_secret` (no Supabase project needed). Postgres + Redis
+    # still come from `docker compose`. NEVER enable in production.
+    demo_mode: bool = False
+    demo_jwt_secret: str = "acuity-demo-mode-not-a-real-secret"
+
 
 @lru_cache
 def get_settings() -> Settings:

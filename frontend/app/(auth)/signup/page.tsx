@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, Suspense, useState } from "react";
+import { type FormEvent, Suspense, useEffect, useState } from "react";
 
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Icon, SectionLabel } from "@/components/ui";
+import { DEMO_MODE } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/client";
 import type { Role } from "@/lib/types";
 
@@ -34,6 +35,11 @@ function SignupForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Demo mode has no real signup — send people to the login page's one-click demo buttons.
+  useEffect(() => {
+    if (DEMO_MODE) router.replace("/login");
+  }, [router]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

@@ -14,7 +14,7 @@ import DisplayNameModal from "@/components/DisplayNameModal";
 import MultiFileEditor, { type MultiFile } from "@/components/Editor/MultiFileEditor";
 import { Icon, Pill, SectionLabel, Wordmark } from "@/components/ui";
 import { api } from "@/lib/api";
-import { createClient } from "@/lib/supabase/client";
+import { getSession } from "@/lib/auth";
 import type { EventRow, Scorecard } from "@/lib/types";
 import { SessionSocket, type SessionEvent } from "@/lib/ws";
 
@@ -129,10 +129,9 @@ export default function InterviewerSessionPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const supabase = createClient();
-      const { data } = await supabase.auth.getSession();
-      const accessToken = data.session?.access_token ?? null;
-      const uid = data.session?.user.id ?? null;
+      const session = await getSession();
+      const accessToken = session?.token ?? null;
+      const uid = session?.userId ?? null;
       setToken(accessToken);
       setMyProfileId(uid);
       if (!accessToken) {

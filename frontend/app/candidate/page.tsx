@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Avatar, Icon, Pill, SectionLabel, Wordmark } from "@/components/ui";
 import { api } from "@/lib/api";
-import { createClient } from "@/lib/supabase/client";
+import { signOut } from "@/lib/auth";
 import type { CandidateSessionLog, Profile } from "@/lib/types";
 import { INTERVIEW_TYPES } from "@/lib/types";
 
@@ -43,8 +43,7 @@ export default function CandidateDashboard() {
   }
 
   async function onLogout() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await signOut();
     router.push("/");
   }
 

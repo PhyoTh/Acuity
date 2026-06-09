@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -33,6 +33,7 @@ from app.redis_client import publish, session_channel
 from app.schemas import (
     GUARDRAIL_PRESETS,
     CandidateSessionLog,
+    CohostLinkOut,
     EventOut,
     JoinRequest,
     JoinResult,
@@ -58,10 +59,17 @@ _CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 
 async def _generate_join_code(db: AsyncSession) -> str:
+    """Allocate a code unique across BOTH invite columns (candidate `join_code` and
+    co-host `interviewer_code`) so the two namespaces never collide."""
     for _ in range(10):
         code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
         clash = await db.scalar(
-            select(InterviewSession.id).where(InterviewSession.join_code == code)
+            select(InterviewSession.id).where(
+                or_(
+                    InterviewSession.join_code == code,
+                    InterviewSession.interviewer_code == code,
+                )
+            )
         )
         if clash is None:
             return code
@@ -154,13 +162,39 @@ async def join_session(
     profile: Annotated[Profile, Depends(get_current_profile)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> JoinResult:
+    code = body.join_code.upper()
     interview = await db.scalar(
-        select(InterviewSession).where(InterviewSession.join_code == body.join_code.upper())
+        select(InterviewSession).where(
+            or_(
+                InterviewSession.join_code == code,
+                InterviewSession.interviewer_code == code,
+            )
+        )
     )
     if interview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid join code")
     if interview.status == SessionStatus.ended:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview has ended")
+
+    # The role is bound to the LINK, not the joiner's account. The candidate `join_code` admits
+    # candidates only; the co-host `interviewer_code` admits interviewers only. This stops a
+    # second interviewer from opening the candidate link and bypassing the waiting room.
+    link_role = (
+        Role.interviewer if interview.interviewer_code == code else Role.candidate
+    )
+    if link_role == Role.candidate and profile.role != Role.candidate:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This is a candidate invite link. If you're co-interviewing, ask the host for "
+                "the interviewer link instead."
+            ),
+        )
+    if link_role == Role.interviewer and profile.role != Role.interviewer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This is an interviewer-only link. Use your candidate invite link to join.",
+        )
 
     existing = await db.scalar(
         select(SessionParticipant).where(
@@ -175,14 +209,35 @@ async def join_session(
             SessionParticipant(
                 session_id=interview.id,
                 profile_id=profile.id,
-                role=profile.role,
-                admitted=profile.role != Role.candidate,
+                role=link_role,
+                admitted=link_role != Role.candidate,
             )
         )
-    if interview.status == SessionStatus.pending and profile.role == Role.candidate:
+    if interview.status == SessionStatus.pending and link_role == Role.candidate:
         interview.status = SessionStatus.active
     await db.commit()
-    return JoinResult(session_id=interview.id, role=profile.role)
+    return JoinResult(session_id=interview.id, role=link_role)
+
+
+@router.post("/{session_id}/cohost-link", response_model=CohostLinkOut)
+async def get_cohost_link(
+    session_id: uuid.UUID,
+    interviewer: Annotated[Profile, Depends(require_role(Role.interviewer))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> CohostLinkOut:
+    """Mint (idempotently) the interviewer-only invite code for a session. Creator-only — this is
+    the link a host shares so another interviewer can observe without taking the candidate seat."""
+    interview = await db.get(InterviewSession, session_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if interview.created_by != interviewer.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only the session creator can do this"
+        )
+    if not interview.interviewer_code:
+        interview.interviewer_code = await _generate_join_code(db)
+        await db.commit()
+    return CohostLinkOut(interviewer_code=interview.interviewer_code)
 
 
 @router.get("/{session_id}", response_model=None)
@@ -204,7 +259,10 @@ async def get_session_view(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant")
 
     model_name = get_settings().anthropic_model
-    if profile.role == Role.interviewer and interview.created_by == profile.id:
+    # Any interviewer *participant* (creator or a co-interviewer who joined via the interviewer
+    # link) sees the full config; candidates get the privacy-stripped view. Membership was
+    # already verified above.
+    if profile.role == Role.interviewer:
         out = SessionOut.model_validate(interview)
         out.ai_model = model_name
         return out

@@ -14,6 +14,7 @@ import secrets
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.config import get_settings
 from app.services.llm import get_chat_model, message_text
 
 _REWRITE_SYSTEM = (
@@ -33,10 +34,28 @@ def _rolls_hit(probability: int) -> bool:
     return secrets.randbelow(100) < probability
 
 
+def _demo_corrupt(answer: str) -> str:
+    """Introduce one subtle, unannounced flaw for DEMO_MODE (no Anthropic call).
+
+    Mutates the agent's canned snippet (off-by-one) when present; otherwise appends a plausible
+    but wrong closing claim. The flaw is never announced — that's the whole point.
+    """
+    if "total // count" in answer:
+        return answer.replace("total // count", "total // (count - 1)", 1)
+    return (
+        answer.rstrip()
+        + "\n\nThis runs in O(1) time and handles the empty case automatically, so no extra "
+        "guard is needed."
+    )
+
+
 async def maybe_inject(*, answer: str, probability: int) -> tuple[str, bool]:
     """Return (possibly_corrupted_answer, was_hallucinated)."""
     if not _rolls_hit(probability):
         return answer, False
+
+    if get_settings().demo_mode:
+        return _demo_corrupt(answer), True
 
     model = get_chat_model(temperature=1.0)
     response = await model.ainvoke(

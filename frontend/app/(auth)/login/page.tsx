@@ -7,6 +7,7 @@ import { type FormEvent, useState } from "react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Icon, SectionLabel } from "@/components/ui";
 import { api } from "@/lib/api";
+import { DEMO_MODE, demoLogin, type Role } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -15,6 +16,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  async function onDemo(role: Role) {
+    setBusy(true);
+    setError(null);
+    try {
+      await demoLogin(role);
+      router.push(role === "interviewer" ? "/dashboard" : "/candidate");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Demo login failed");
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -62,6 +75,38 @@ export default function LoginPage() {
       >
         Log in
       </h1>
+      {DEMO_MODE && (
+        <div
+          className="mt-6 flex flex-col gap-2 rounded-lg"
+          style={{ border: "1px solid var(--line-1)", padding: 16, background: "var(--bg-1)" }}
+        >
+          <span className="section-label" style={{ color: "var(--live)" }}>Demo mode</span>
+          <p style={{ color: "var(--fg-2)", fontSize: 12.5, lineHeight: 1.5 }}>
+            No account needed — enter the full product with a one-click identity. For the
+            candidate side, open an invite link in an incognito window.
+          </p>
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              className="btn btn-primary flex-1 justify-center"
+              disabled={busy}
+              aria-disabled={busy}
+              onClick={() => onDemo("interviewer")}
+            >
+              Enter as interviewer <Icon name="arrow-right" size={14} />
+            </button>
+            <button
+              type="button"
+              className="btn flex-1 justify-center"
+              disabled={busy}
+              aria-disabled={busy}
+              onClick={() => onDemo("candidate")}
+            >
+              Enter as candidate
+            </button>
+          </div>
+        </div>
+      )}
       <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-3">
         <label className="flex flex-col gap-1.5">
           <span className="section-label">Email</span>

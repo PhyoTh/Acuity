@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.config import get_settings
 from app.services.llm import get_chat_model, message_text
 
 _SYSTEM = (
@@ -18,7 +19,17 @@ _SYSTEM = (
 )
 
 
+_DEMO_QUESTIONS = [
+    "Walk me through the time and space complexity of your current approach.",
+    "What edge case is most likely to break this, and how would you guard against it?",
+    "Why did you choose this data structure over the alternatives?",
+]
+
+
 async def generate(*, code: str, transcript: list[tuple[str, str]]) -> list[str]:
+    if get_settings().demo_mode:
+        return list(_DEMO_QUESTIONS)
+
     convo = "\n".join(f"{role}: {content}" for role, content in transcript[-6:]) or "(no chat yet)"
     snippet = code.strip() or "(editor empty)"
     model = get_chat_model(max_tokens=256, temperature=0.7)

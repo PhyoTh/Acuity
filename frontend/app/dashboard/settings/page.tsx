@@ -6,8 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardSidebar } from "@/components/Dashboard/Sidebar";
 import { Avatar, Icon, Pill, Progress, SectionLabel } from "@/components/ui";
 import { api } from "@/lib/api";
+import { getEmail, signOut } from "@/lib/auth";
 import { API_BALANCE } from "@/lib/mocks";
-import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/lib/types";
 
 // Interviewer settings panel at /dashboard/settings.
@@ -28,13 +28,11 @@ export default function SettingsPage() {
 
   useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null));
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ""));
+    getEmail().then(setEmail);
   }, []);
 
   async function onSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await signOut();
     router.push("/");
   }
 

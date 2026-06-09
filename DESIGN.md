@@ -1,7 +1,7 @@
 # DESIGN.md
 
-Six design decisions that shaped Acuity (formerly DevLens), pulled from the build sessions.
-For the running roadmap/status see [plan.md](plan.md); for conventions see [CLAUDE.md](CLAUDE.md).
+Six design decisions that shaped Acuity, pulled from the build sessions. For architecture,
+conventions, and feature status see [CLAUDE.md](CLAUDE.md).
 
 ---
 
@@ -96,12 +96,12 @@ out by bugs I hit while testing.
 
 ## 6. The UI overhaul renders unbuilt features as documented mocks — it never fakes "live"
 
-**Decision.** When we renamed DevLens → Acuity and rebuilt the whole frontend against the design
-roadmap, a lot of the mockups depicted things we have no backend for yet (per-user token spend, the
-shared API balance, the schedule calendar's data, the activity feed, Settings, Export PDF, etc). The
-rule we set: render those surfaces from `lib/mocks.ts` so the product *looks* complete, but write every
-one of them down in [plan.md §9b](plan.md) as explicitly unwired — and **never touch the real data
-flows** (auth, WS sync, code execution, scorecard) while doing a visual pass.
+**Decision.** When we rebuilt the whole frontend against the design roadmap, a lot of the mockups
+depicted things we have no backend for yet (per-user token spend, the shared API balance, the
+schedule calendar's data, the activity feed, Settings, Export PDF, etc). The rule we set: render
+those surfaces from `lib/mocks.ts` so the product *looks* complete, but treat that file as
+explicitly unwired — and **never touch the real data flows** (auth, WS sync, code execution,
+scorecard) while doing a visual pass.
 
 I chose this deliberately over the two alternatives (hide the unbuilt cards, or fake them as if live).
 Hiding them would've made the redesign look half-finished and lost the roadmap's intent; faking them as
