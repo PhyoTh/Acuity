@@ -74,6 +74,12 @@ class InterviewSession(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     join_code: Mapped[str] = mapped_column(String(12), unique=True, index=True, nullable=False)
+    # Optional second invite code for co-interviewers. Generated on demand (POST
+    # /sessions/{id}/cohost-link). Joining with this code requires an interviewer account; joining
+    # with `join_code` requires a candidate account — role is bound to the link, not the joiner.
+    interviewer_code: Mapped[str | None] = mapped_column(
+        String(12), unique=True, index=True, nullable=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )

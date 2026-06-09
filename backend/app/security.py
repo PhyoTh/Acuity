@@ -54,9 +54,18 @@ def decode_token(token: str) -> TokenData:
     """Verify a Supabase JWT and extract identity. Raises 401 on any failure.
 
     Real Supabase user tokens are ES256/RS256 (verified via JWKS). HS256 (legacy shared secret)
-    is also accepted so locally minted dev tokens work (scripts/mint_test_token.py).
+    is also accepted so locally minted dev tokens work (scripts/mint_test_token.py). In demo mode
+    tokens are HS256 signed with `demo_jwt_secret` (issued by POST /auth/demo-login).
     """
     try:
+        if settings.demo_mode:
+            payload = jwt.decode(
+                token,
+                settings.demo_jwt_secret,
+                algorithms=["HS256"],
+                audience=settings.jwt_audience,
+            )
+            return _extract(payload)
         alg = str(jwt.get_unverified_header(token).get("alg", ""))
         if alg == "HS256":
             payload = jwt.decode(
@@ -78,6 +87,11 @@ def decode_token(token: str) -> TokenData:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         ) from exc
 
+    return _extract(payload)
+
+
+def _extract(payload: dict[str, object]) -> TokenData:
+    """Pull identity + role hint out of a verified JWT payload."""
     sub = payload.get("sub")
     if not sub:
         raise HTTPException(
@@ -85,10 +99,15 @@ def decode_token(token: str) -> TokenData:
         )
 
     meta = payload.get("user_metadata") or {}
-    role_value = meta.get("role", Role.candidate.value)
+    role_value = meta.get("role", Role.candidate.value) if isinstance(meta, dict) else None
     role_hint = Role(role_value) if role_value in {r.value for r in Role} else Role.candidate
+    email = payload.get("email")
 
-    return TokenData(user_id=uuid.UUID(str(sub)), email=payload.get("email"), role_hint=role_hint)
+    return TokenData(
+        user_id=uuid.UUID(str(sub)),
+        email=str(email) if email is not None else None,
+        role_hint=role_hint,
+    )
 
 
 async def get_token_data(

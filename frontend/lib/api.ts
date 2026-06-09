@@ -1,6 +1,6 @@
-// Typed client for the FastAPI backend. Attaches the Supabase access token as a Bearer header.
+// Typed client for the FastAPI backend. Attaches the access token (Supabase or demo) as a Bearer.
 
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth";
 import type {
   CandidateSessionLog,
   EventRow,
@@ -19,11 +19,8 @@ import type {
 const API_URL = process.env.NEXT_PUBLIC_API_URL!;
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+  const token = await getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -53,6 +50,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ join_code: joinCode }),
     }),
+  cohostLink: (id: string) =>
+    request<{ interviewer_code: string }>(`/sessions/${id}/cohost-link`, { method: "POST" }),
   getSession: (id: string) => request<SessionConfig | SessionCandidateView>(`/sessions/${id}`),
   getScorecard: (id: string) => request<Scorecard>(`/sessions/${id}/scorecard`),
   runCode: (id: string, code: string) =>

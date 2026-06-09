@@ -165,6 +165,7 @@ class SessionOut(BaseModel):
 
     id: uuid.UUID
     join_code: str
+    interviewer_code: str | None = None
     created_by: uuid.UUID
     title: str
     language: str
@@ -228,6 +229,12 @@ class JoinRequest(BaseModel):
 class JoinResult(BaseModel):
     session_id: uuid.UUID
     role: Role
+
+
+class CohostLinkOut(BaseModel):
+    """The interviewer-only co-host invite code for a session."""
+
+    interviewer_code: str
 
 
 class ScorecardOut(BaseModel):

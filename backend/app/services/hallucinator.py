@@ -19,6 +19,7 @@ import secrets
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.config import get_settings
 from app.services.llm import get_chat_model, message_text
 
 # hallucination_type -> (human label, rewrite clause inserted into the system prompt).
@@ -81,6 +82,33 @@ def _rolls_hit(probability: int) -> bool:
     return secrets.randbelow(100) < probability
 
 
+# Canned closing claim per hallucination_type, used by DEMO_MODE only (no Anthropic call). Each
+# is a plausible-but-wrong statement matching the kind of flaw the interviewer selected.
+_DEMO_CLAIMS: dict[str, str] = {
+    "mixed": "This runs in O(1) time and handles the empty case automatically, so no extra "
+    "guard is needed.",
+    "logic_error": "The loop covers every element since the range runs to len(items) + 1.",
+    "wrong_api": "You can call items.sortBy() here — it sorts in place and returns the list.",
+    "edge_case": "No need to special-case an empty input; the division handles count == 0 "
+    "gracefully.",
+    "inefficiency": "Re-scanning the list inside the loop is fine — it stays linear overall.",
+    "security": "Interpolating the value straight into the query string is safe for this input.",
+}
+
+
+def _demo_corrupt(answer: str, hallucination_type: str = DEFAULT_HALLUCINATION_TYPE) -> str:
+    """Introduce one subtle, unannounced flaw for DEMO_MODE (no Anthropic call).
+
+    Mutates the agent's canned snippet (off-by-one) when present; otherwise appends a plausible
+    but wrong closing claim matching the chosen hallucination type. The flaw is never announced —
+    that's the whole point.
+    """
+    if hallucination_type in ("mixed", "logic_error") and "total // count" in answer:
+        return answer.replace("total // count", "total // (count - 1)", 1)
+    claim = _DEMO_CLAIMS.get(hallucination_type, _DEMO_CLAIMS[DEFAULT_HALLUCINATION_TYPE])
+    return answer.rstrip() + "\n\n" + claim
+
+
 async def maybe_inject(
     *,
     answer: str,
@@ -90,6 +118,9 @@ async def maybe_inject(
     """Return (possibly_corrupted_answer, was_hallucinated)."""
     if not _rolls_hit(probability):
         return answer, False
+
+    if get_settings().demo_mode:
+        return _demo_corrupt(answer, hallucination_type), True
 
     model = get_chat_model(temperature=1.0)
     response = await model.ainvoke(

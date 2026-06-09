@@ -149,6 +149,7 @@ export interface Profile {
 export interface SessionConfig {
   id: string;
   join_code: string;
+  interviewer_code: string | null;
   created_by: string;
   title: string;
   language: string;
