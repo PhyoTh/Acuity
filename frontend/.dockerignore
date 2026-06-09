@@ -1,0 +1,8 @@
+# Keep the build context small and avoid copying host (possibly wrong-arch) artifacts.
+node_modules/
+.next/
+.git/
+.env*
+!.env.local.example
+npm-debug.log*
+.DS_Store

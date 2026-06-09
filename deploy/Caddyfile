@@ -1,0 +1,18 @@
+# Acuity reverse proxy — automatic HTTPS (Let's Encrypt) + WebSocket passthrough.
+#
+# Single domain, path-based routing: the backend owns /auth, /sessions, /ws, /health; everything
+# else is the Next.js frontend. Caddy upgrades /ws/* to a WebSocket transparently, so the browser
+# gets wss:// for free once the cert is issued. $ACUITY_DOMAIN is provided by the compose env.
+
+{$ACUITY_DOMAIN} {
+	# Backend API + WebSocket gateway.
+	@backend path /auth/* /sessions/* /ws/* /health
+	handle @backend {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else → Next.js frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

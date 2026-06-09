@@ -30,7 +30,10 @@ whether candidates *critically evaluate* AI output instead of copying it.
   managed with **uv**.
 - **Data + auth:** a single **Supabase** project provides both Postgres (app data) and Auth. Our
   tables are managed by our own Alembic migrations and live beside Supabase's `auth` schema.
-- **Infra:** Redis + Postgres locally via Docker; prod on Supabase + Render.
+- **Infra:** Redis + Postgres locally via Docker. Prod: Postgres + Auth on Supabase; the app
+  (backend + Redis + frontend + Caddy for HTTPS/`wss`) self-hosted on a free Oracle Cloud
+  Always-Free VM via `docker-compose.prod.yml` (see `DEPLOY.md`). A `render.yaml` blueprint is
+  kept as a paid managed alternative.
 - **Model:** all LLM calls go through Claude via `langchain-anthropic`; the model id is env-driven
   (`ANTHROPIC_MODEL`). AI is cost-optimized: cheap default model, capped `max_tokens`, capped
   chat history.

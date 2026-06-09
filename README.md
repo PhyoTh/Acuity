@@ -50,7 +50,7 @@ an LLM generates a structured **scorecard** from the recorded transcript and tel
 | Cache / pub-sub | Redis |
 | Code execution | Wandbox API |
 | Auth | Supabase Auth |
-| Deployment | Render |
+| Deployment | Docker Compose on a VM (Caddy HTTPS/wss) — see [DEPLOY.md](DEPLOY.md) |
 
 ## Quickstart
 
