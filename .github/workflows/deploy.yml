@@ -1,0 +1,38 @@
+# Auto-deploy to the production VM on every push to main.
+# SSHes into the Oracle VM, pulls the latest code, and rebuilds/restarts the stack.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   VM_HOST     – the VM's public IP (e.g. 147.224.53.201)
+#   VM_USER     – ssh user (ubuntu)
+#   VM_SSH_KEY  – contents of your private key (~/.ssh/acuity_oracle)
+#
+# deploy/.env lives on the VM (gitignored) and is left untouched by the pull.
+
+name: Deploy to VM
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # let an in-flight deploy finish before the next starts
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Redeploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          command_timeout: 20m # the frontend build is slow on the 1 GB box
+          script: |
+            set -e
+            cd ~/Acuity
+            git pull --ff-only origin main
+            docker compose --env-file deploy/.env -f docker-compose.prod.yml up -d --build
+            docker image prune -f

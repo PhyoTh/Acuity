@@ -22,6 +22,10 @@ function nameConfirmedKey(sessionId: string): string {
 const CodeEditor = dynamic(() => import("@/components/Editor/CodeEditor"), { ssr: false });
 
 const PASTE_THRESHOLD = 40; // chars; larger pastes get flagged
+// How often (ms) to stream the editor buffer to the interviewer WHILE typing. A throttle (not a
+// debounce) so the mirror updates continuously as the candidate types, instead of only after they
+// pause. ~90ms ≈ 11 updates/sec — feels live without saturating the channel.
+const CODE_SYNC_THROTTLE_MS = 90;
 
 interface Participant {
   profile_id: string;
@@ -85,6 +89,7 @@ export default function CandidateSessionPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myProfileIdRef = useRef<string | null>(null);
   const lastCursorSendRef = useRef<number>(0);
+  const lastCodeSentRef = useRef<number>(0);
   const fileSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // The backend sends one `code_change` event right after WS connect (the latest snapshot
   // from the event log). Apply that to repopulate the editor on rejoin, but ignore any
@@ -296,10 +301,24 @@ export default function CandidateSessionPage() {
   function onCodeChange(value: string) {
     setCode(value);
     codeRef.current = value;
+    // Throttle, not debounce: send the leading keystroke immediately, then at most once per
+    // CODE_SYNC_THROTTLE_MS while typing, plus a trailing send for the final state. The mirror
+    // streams live instead of appearing all at once after the candidate stops.
+    const now = Date.now();
+    const elapsed = now - lastCodeSentRef.current;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
+    if (elapsed >= CODE_SYNC_THROTTLE_MS) {
+      lastCodeSentRef.current = now;
       socketRef.current?.send("code_change", { code: value, language: languageRef.current });
-    }, 400);
+    } else {
+      debounceRef.current = setTimeout(() => {
+        lastCodeSentRef.current = Date.now();
+        socketRef.current?.send("code_change", {
+          code: codeRef.current,
+          language: languageRef.current,
+        });
+      }, CODE_SYNC_THROTTLE_MS - elapsed);
+    }
   }
 
   function onPaste(length: number) {
