@@ -5,8 +5,9 @@
 # gets wss:// for free once the cert is issued. $ACUITY_DOMAIN is provided by the compose env.
 
 {$ACUITY_DOMAIN} {
-	# Backend API + WebSocket gateway.
-	@backend path /auth/* /sessions/* /ws/* /health
+	# Backend API + WebSocket gateway. Match both the bare prefixes (e.g. GET /sessions, the
+	# list endpoint) AND their sub-paths — `/sessions/*` alone would miss the bare `/sessions`.
+	@backend path /auth /auth/* /sessions /sessions/* /ws /ws/* /health
 	handle @backend {
 		reverse_proxy backend:8000
 	}
