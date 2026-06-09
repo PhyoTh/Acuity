@@ -67,6 +67,7 @@ export default function InterviewerSessionPage() {
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
   const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
+  const [hallucinationType, setHallucinationType] = useState<string>("mixed");
   const [title, setTitle] = useState<string>("");
   const [createdAt, setCreatedAt] = useState<string>("");
   const [endedAt, setEndedAt] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export default function InterviewerSessionPage() {
           setGuardrailPresets(interview.guardrail_presets);
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+        if ("hallucination_type" in interview) setHallucinationType(interview.hallucination_type);
         if ("join_code" in interview) setJoinCode(interview.join_code);
         if ("interview_type" in interview) setInterviewType(interview.interview_type);
         if ("status" in interview && interview.status === "ended") {
@@ -489,6 +491,7 @@ export default function InterviewerSessionPage() {
                   guardrailPreset={guardrailPreset}
                   guardrailPresets={guardrailPresets}
                   hallucinationPct={hallucinationPct}
+                  hallucinationType={hallucinationType}
                 />
               )}
               <div className="flex-1 overflow-hidden">

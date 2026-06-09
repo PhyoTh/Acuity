@@ -32,6 +32,7 @@ from app.db.models import (
 from app.redis_client import publish, session_channel
 from app.schemas import (
     GUARDRAIL_PRESETS,
+    HALLUCINATION_TYPES,
     CandidateSessionLog,
     EventOut,
     JoinRequest,
@@ -87,6 +88,11 @@ async def create_session(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"guardrail preset must be one of {GUARDRAIL_PRESETS}",
             )
+    if body.hallucination_type not in HALLUCINATION_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"hallucination type must be one of {HALLUCINATION_TYPES}",
+        )
     data = body.model_dump()
     data["guardrail_preset"] = presets[0]
     data["guardrail_presets"] = presets
@@ -377,9 +383,7 @@ async def create_file(
     await _require_participant(session_id, profile, db)
     path = _normalize_path(body.path)
     existing = await db.scalar(
-        select(SessionFile).where(
-            SessionFile.session_id == session_id, SessionFile.path == path
-        )
+        select(SessionFile).where(SessionFile.session_id == session_id, SessionFile.path == path)
     )
     if existing is not None:
         raise HTTPException(status_code=409, detail="A file or folder with that path exists")
@@ -431,7 +435,7 @@ async def update_file(
                 )
             )
             for d in descendants:
-                d.path = new_prefix + d.path[len(old_prefix):]
+                d.path = new_prefix + d.path[len(old_prefix) :]
                 d.updated_at = datetime.now(UTC)
         f.path = new_path
         path_changed = True

@@ -6,6 +6,8 @@ import { Icon, Pill, SectionLabel } from "@/components/ui";
 import { api } from "@/lib/api";
 import {
   GUARDRAIL_PRESETS,
+  HALLUCINATION_TYPES,
+  HALLUCINATION_TYPE_LABELS,
   INTERVIEW_TYPES,
   type SessionConfig,
   type SessionCreateInput,
@@ -56,6 +58,7 @@ export default function CreateSessionForm({
     guardrail_presets: [DEFAULT_TYPE.defaults.guardrail_preset],
     guardrail_custom: "",
     hallucination_pct: DEFAULT_TYPE.defaults.hallucination_pct,
+    hallucination_type: DEFAULT_TYPE.defaults.hallucination_type,
     test_cases: [],
     token_budget: DEFAULT_TYPE.defaults.token_budget,
     enable_pushback: false,
@@ -77,6 +80,7 @@ export default function CreateSessionForm({
       guardrail_preset: t.defaults.guardrail_preset,
       guardrail_presets: [t.defaults.guardrail_preset],
       hallucination_pct: t.defaults.hallucination_pct,
+      hallucination_type: t.defaults.hallucination_type,
       token_budget: t.defaults.token_budget,
     }));
   }
@@ -552,6 +556,26 @@ export default function CreateSessionForm({
                 <span>100% — chaos</span>
               </div>
             </Field>
+
+            {form.hallucination_pct > 0 && (
+              <Field label="Hallucination type (what kind of flaw the injector introduces)">
+                <select
+                  className="input mono"
+                  value={form.hallucination_type}
+                  onChange={(e) => update("hallucination_type", e.target.value)}
+                >
+                  {HALLUCINATION_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {HALLUCINATION_TYPE_LABELS[t] ?? t}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1" style={{ fontSize: 11, color: "var(--fg-3)" }}>
+                  Each corrupted reply gets exactly one flaw of this kind — match it to what the
+                  interview should test (e.g. logic errors for debugging, wrong-API for integration).
+                </span>
+              </Field>
+            )}
 
             <Field label="Token budget (total input + output, across the whole session; 0 = unlimited)">
               <input
