@@ -1,59 +1,14 @@
 # Acuity
 
-> Formerly known as **DevLens**. Repository directory name still says `DevLens/`; the project,
-> wordmark, and product copy are now **Acuity**.
+## Overview
 
-An interactive, **live technical-interview** platform. A candidate solves a coding problem in a
-Monaco IDE with an embedded **AI assistant**, while an interviewer silently watches a **real-time
-telemetry + evaluation dashboard**.
-
-The defining twist is a **Hallucination Injector**: the AI's correct output is, with an
-interviewer-configured probability, subtly rewritten to contain plausible flaws — so the interview
-measures whether candidates *critically evaluate* AI rather than blindly copy it.
-
-> **Status:** Deliverable 1 is code-complete (auth, interview sessions, live WebSocket sync, AI
-> assistant, hallucination injector, and LLM scorecard) and statically verified. Subsequent
-> rounds added the multi-step session wizard, CodeSignal-style resizable layout, waiting room,
-> post-mortem summary view, multi-file project support, an interactive shell, tab-switch +
-> cursor + idle monitoring, multi-select guardrails, function-call test mode, markdown chat
-> rendering, and a richer replay timeline. To run it you need a free Supabase project + an
-> Anthropic key — see **[SETUP.md](SETUP.md)** for a step-by-step guide. See [plan.md](plan.md)
-> for the roadmap/status and [CLAUDE.md](CLAUDE.md) for architecture + conventions.
-
-— Sithu Soe (A17342422) · Phyo Thant (A18498144)
-
-## What's in the box
-
-- **Live IDE mirror.** Candidate types in Monaco; interviewer sees the same code + an amber
-  blinking caret tracking the candidate's cursor position.
-- **Multi-file projects.** Drag-drop files (or a whole folder) when creating a session; the
-  candidate sees the same tree in their IDE with inline rename / delete / new-file / new-folder
-  (VS Code-style — no browser `prompt()`). Folder uploads preserve nested structure. Edits sync
-  live to the interviewer; structural changes broadcast a refetch ping.
-- **AI assistant with stacked guardrails.** Pick one or more presets (hints only, no full
-  solutions, explain don't write, syntax only, open) and they compose — strictest wins. Replies
-  render as markdown. Sees the whole multi-file project as context.
-- **Hallucination Injector.** With probability `p`, the AI's reply is rewritten by a second
-  Claude pass to contain plausible flaws. Interviewer sees a flag on hallucinated turns;
-  candidate never does.
-- **Hidden tests with two run modes.** Stdin mode (script reads input, prints output) *and*
-  call mode (LeetCode-style — set a function-call expression and let the runner appends a
-  harness). Output comparison is JSON-aware and whitespace-tolerant.
-- **Interactive terminal.** Candidate can type `ls`, `cat <path>`, `run`, `python main.py`, etc.
-  against their file tree. Output mirrors to the interviewer dashboard. Tabs for code-run
-  output, hidden-test pass/fail, and the shell live in the same panel.
-- **Monitoring + replay.** Tab-switch detection (interviewer sees `🔴 candidate is on another
-  tab` live), large-paste flags, idle-gap detection from mouse + cursor + code activity, and a
-  YouTube-ad-style replay timeline with amber idle bands and event markers for tab switches,
-  pastes, and runs.
-- **Waiting room.** Candidates wait for explicit admit by the interviewer. Even when the
-  interviewer joins *after* the candidate, the initial WS frame delivers the participants
-  snapshot directly to the socket (avoiding pub/sub race conditions), so the join request shows
-  up instantly without a refresh.
-- **Two-phase end-interview** with a confirmation modal. The session flips to summary mode
-  immediately; Claude generates the scorecard in the background and emits `scorecard_ready`
-  when ready. Candidate budget exhaustion replaces the chat composer with an explicit
-  "AI assistance has run out" panel.
+* **Real-time IDE Mirror:** Live code syncing using Monaco, featuring a blinking caret so the interviewer can track the candidate's cursor position in real-time.
+* **Multi-file Projects:** Candidates can work out of a proper file tree. Interviewers can drag-and-drop folders to seed a session, and structural changes (like adding, deleting, or renaming files) sync instantly across both screens.
+* **Guarded AI Assistant:** A built-in Claude assistant with customizable restrictions (e.g., "hints only," "no full solutions"). The AI has full context of the entire multi-file project.
+* **Hallucination Injector:** To test a candidate's debugging skills, you can toggle a mode where Claude intentionally injects plausible bugs into its advice. Only the interviewer can see which hints are flawed.
+* **Code Runner & Terminal:** A shared interactive shell where candidates can run arbitrary commands (`ls`, `cat`, `python main.py`) against their workspace. Supports standard stdin/stdout testing or LeetCode-style function harnesses with JSON-aware output matching.
+* **Proctoring & Replay:** Tracks tab-switching, large text pastes, and idle time. Includes a full session playback timeline that highlights exactly when the candidate pasted code, switched tabs, or ran their program.
+* **Robust Session State:** Includes a candidate waiting room, robust WebSocket syncing to prevent race conditions when users connect, and an automatic interview scorecard summary generated by Claude at the end of the session.
 
 ## Stack
 
@@ -90,5 +45,3 @@ cp .env.local.example .env.local
 pnpm install
 pnpm dev                        # http://localhost:3000
 ```
-
-See [CLAUDE.md](CLAUDE.md) for the full command reference, architecture, and conventions.
