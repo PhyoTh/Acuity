@@ -1,5 +1,7 @@
 # Acuity
 
+**Live demo: https://acuity-phyo.duckdns.org** · [Demo video](https://www.youtube.com/watch?v=ULcqjiKwaZw)
+
 A **live technical-interview platform**. A candidate solves a coding problem in a Monaco IDE with
 an embedded **AI assistant**, while an interviewer silently watches a **real-time telemetry +
 evaluation dashboard**.

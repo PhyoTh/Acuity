@@ -74,7 +74,7 @@ export default function SummaryView({
   }
 
   // Heuristic chips derived from scorecard.scores (no separate backend field for them yet).
-  // See plan.md §9b — per-dimension justifications + structured tags are visual-only.
+  // Per-dimension justifications + structured tags are visual-only.
   const hallucinationTotal = transcripts.filter(
     (t) => t.role === "assistant" && t.was_hallucinated,
   ).length;

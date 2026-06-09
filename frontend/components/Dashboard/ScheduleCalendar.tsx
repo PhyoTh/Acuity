@@ -10,7 +10,7 @@ import type { SessionSummary } from "@/lib/types";
 // listing the sessions for that day with their join codes — click one to open it.
 //
 // Limitation: we don't have a `scheduled_at` column on `interview_sessions` yet, so we
-// use `created_at` as a proxy. See plan.md §9b — true scheduled-time support is on the
+// use `created_at` as a proxy. True scheduled-time support is on the
 // "unwired" list.
 export function ScheduleCalendar({
   sessions,

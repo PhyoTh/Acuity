@@ -1,4 +1,4 @@
-// Session WebSocket client. Connects to the FastAPI gateway and exchanges the events in plan.md §5.
+// Session WebSocket client. Connects to the FastAPI gateway and exchanges the events documented in CLAUDE.md.
 
 export type SessionEventType =
   | "presence"

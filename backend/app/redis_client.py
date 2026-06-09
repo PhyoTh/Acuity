@@ -1,6 +1,6 @@
 """Async Redis client + pub/sub helpers for the real-time sync gateway.
 
-Channel convention (plan.md §5): `session:{id}`. The WS gateway publishes every session event here
+Channel convention: `session:{id}`. The WS gateway publishes every session event here
 so that all connected sockets for that session (candidate IDE + interviewer dashboard) receive it.
 """
 

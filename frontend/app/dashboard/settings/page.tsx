@@ -16,7 +16,7 @@ import type { Profile } from "@/lib/types";
 //   - Account (display name → PATCH /auth/me; email read-only from Supabase auth)
 //   - Sign out (Supabase signOut + redirect)
 //
-// Mock-only (UI present, no backend) — see plan.md §9c/§9d:
+// Mock-only (UI present, no backend):
 //   - Anthropic API key with reveal toggle
 //   - Team & billing (invite-by-email, monthly Anthropic budget)
 //   - Email notifications
@@ -76,7 +76,7 @@ export default function SettingsPage() {
   );
 }
 
-/* -------- API key (mock — env-driven in reality, see plan.md §9c) -------- */
+/* -------- API key (mock — env-driven in reality) -------- */
 
 function ApiKeySection() {
   const [revealed, setRevealed] = useState(false);
@@ -225,7 +225,7 @@ function AccountSection({
   );
 }
 
-/* -------- Team & billing (all mock — see plan.md §9c) -------- */
+/* -------- Team & billing (all mock) -------- */
 
 function TeamBillingSection() {
   const [budget, setBudget] = useState(String(API_BALANCE.total));

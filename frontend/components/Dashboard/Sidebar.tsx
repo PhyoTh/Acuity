@@ -18,7 +18,7 @@ const NAV: SidebarNavItem[] = [
 ];
 
 // Sticky 240px sidebar for the interviewer dashboard. Tabs other than "Sessions" and
-// "Settings" are decorative — no backend yet (see plan.md §9b).
+// "Settings" are decorative — no backend yet.
 export function DashboardSidebar({ activeKey = "sessions" }: { activeKey?: string }) {
   return (
     <aside

@@ -1,29 +1,22 @@
 """Hallucination injector.
 
-Inputs : the agent's (correct) answer + the session's hallucination probability (0-100) and the
-         interviewer-selected hallucination *type*.
-Output : with probability p, a subtly corrupted version (one plausible flaw of the chosen type);
-         otherwise the original answer unchanged. Returns a flag so the interviewer dashboard can
-         mark the turn.
-Effect : forces the candidate to read and debug the AI's output rather than copy it blindly.
+The interviewer sets a probability (0-100) and a *type* of flaw. On each AI turn we roll once
+(`should_inject`); if it hits, the agent is told to bake exactly one subtle flaw of the chosen
+type directly into its single generation call (`injection_system` is appended to the agent's
+system prompt). This is a deliberate cost choice: a corrupted turn now costs ONE model call
+instead of two (we used to generate a clean answer and then make a second pass to corrupt it).
 
-Implementation (locked, plan.md §3): a second Claude pass that introduces a SUBTLE flaw. The
-interviewer picks *which kind* of flaw via `hallucination_type` — the type selects the rewrite
-clause below so the injected error matches what the interview is meant to test (e.g. a debugging
-interview wants logic errors; an API-integration interview wants wrong-API calls).
+Effect: forces the candidate to read and debug the AI's output rather than copy it blindly. The
+`hallucination_type` selects the clause so the injected error matches what the interview tests
+(a debugging interview wants logic errors; an API-integration interview wants wrong-API calls).
 """
 
 from __future__ import annotations
 
 import secrets
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from app.config import get_settings
-from app.services.llm import get_chat_model, message_text
-
-# hallucination_type -> (human label, rewrite clause inserted into the system prompt).
-# `mixed` is the default and preserves the original "any one subtle flaw" behavior.
+# hallucination_type -> (human label, clause describing the flaw to introduce).
+# `mixed` is the default and keeps the original "any one subtle flaw" behavior.
 HALLUCINATION_TYPES: dict[str, tuple[str, str]] = {
     "mixed": (
         "Mixed (any subtle flaw)",
@@ -47,8 +40,8 @@ HALLUCINATION_TYPES: dict[str, tuple[str, str]] = {
     ),
     "inefficiency": (
         "Hidden inefficiency",
-        "rewrite the solution so it is subtly less efficient than claimed (e.g. an unnecessary "
-        "nested loop or repeated work) while still presenting it as optimal",
+        "make the solution subtly less efficient than claimed (e.g. an unnecessary nested loop or "
+        "repeated work) while still presenting it as optimal",
     ),
     "security": (
         "Security vulnerability",
@@ -59,21 +52,24 @@ HALLUCINATION_TYPES: dict[str, tuple[str, str]] = {
 
 DEFAULT_HALLUCINATION_TYPE = "mixed"
 
-_REWRITE_SYSTEM_TEMPLATE = (
-    "You are a red-team assistant for an interview platform. You rewrite a coding assistant's "
-    "answer so that you {clause}. Keep the same length, tone, and structure. Do NOT announce, "
-    "hint at, or comment on the flaw. Return only the rewritten answer."
+_INJECT_TEMPLATE = (
+    "RED-TEAM OVERRIDE for this interview platform: as you write your answer, {clause}. Keep the "
+    "answer natural, confident, and the same length you would normally write. Do NOT announce, "
+    "hint at, or comment on the flaw anywhere in your reply."
 )
 
 
-def _rewrite_system(hallucination_type: str) -> str:
+def injection_system(hallucination_type: str = DEFAULT_HALLUCINATION_TYPE) -> str:
+    """The instruction appended to the agent's system prompt so its single call produces a
+    subtly-flawed answer of the chosen type."""
     _label, clause = HALLUCINATION_TYPES.get(
         hallucination_type, HALLUCINATION_TYPES[DEFAULT_HALLUCINATION_TYPE]
     )
-    return _REWRITE_SYSTEM_TEMPLATE.format(clause=clause)
+    return _INJECT_TEMPLATE.format(clause=clause)
 
 
-def _rolls_hit(probability: int) -> bool:
+def should_inject(probability: int) -> bool:
+    """Roll once against the interviewer's hallucination probability (0-100)."""
     if probability <= 0:
         return False
     if probability >= 100:
@@ -96,37 +92,13 @@ _DEMO_CLAIMS: dict[str, str] = {
 }
 
 
-def _demo_corrupt(answer: str, hallucination_type: str = DEFAULT_HALLUCINATION_TYPE) -> str:
+def demo_corrupt(answer: str, hallucination_type: str = DEFAULT_HALLUCINATION_TYPE) -> str:
     """Introduce one subtle, unannounced flaw for DEMO_MODE (no Anthropic call).
 
     Mutates the agent's canned snippet (off-by-one) when present; otherwise appends a plausible
-    but wrong closing claim matching the chosen hallucination type. The flaw is never announced —
-    that's the whole point.
+    but wrong closing claim matching the chosen hallucination type. The flaw is never announced.
     """
     if hallucination_type in ("mixed", "logic_error") and "total // count" in answer:
         return answer.replace("total // count", "total // (count - 1)", 1)
     claim = _DEMO_CLAIMS.get(hallucination_type, _DEMO_CLAIMS[DEFAULT_HALLUCINATION_TYPE])
     return answer.rstrip() + "\n\n" + claim
-
-
-async def maybe_inject(
-    *,
-    answer: str,
-    probability: int,
-    hallucination_type: str = DEFAULT_HALLUCINATION_TYPE,
-) -> tuple[str, bool]:
-    """Return (possibly_corrupted_answer, was_hallucinated)."""
-    if not _rolls_hit(probability):
-        return answer, False
-
-    if get_settings().demo_mode:
-        return _demo_corrupt(answer, hallucination_type), True
-
-    model = get_chat_model(temperature=1.0)
-    response = await model.ainvoke(
-        [SystemMessage(content=_rewrite_system(hallucination_type)), HumanMessage(content=answer)]
-    )
-    corrupted = message_text(response).strip()
-    if not corrupted:
-        return answer, False
-    return corrupted, True

@@ -8,7 +8,7 @@ Output : an LLM-generated reply that obeys the interviewer's guardrails, paired 
 
 The graph is intentionally minimal for Deliverable 1 — a single model node — but uses LangGraph so
 it can grow (tools, retrieval, push-back questions) without restructuring. History is capped to
-control token cost (see plan.md cost notes).
+control token cost.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.config import get_settings
+from app.services import hallucinator
 from app.services.llm import cached_system_message, get_chat_model, message_text
 
 # How many prior turns to send back to the model (cost control).
@@ -71,16 +72,28 @@ async def generate_reply(
     language: str,
     system_prompt: str,
     history: list[tuple[str, str]],
+    inject: bool = False,
+    hallucination_type: str = "mixed",
 ) -> tuple[str, int]:
     """Return (assistant_reply_text, tokens_used_in_this_call).
 
     Tokens used = input_tokens + output_tokens reported by Anthropic for this single call. The
     caller (ws.py) accumulates this in Redis against the session's `token_budget`.
+
+    When `inject` is true the hallucination instruction is folded into THIS call's system prompt so
+    the model produces a subtly-flawed answer directly — no separate corruption pass (one model
+    call instead of two on a hallucinated turn).
     """
     if get_settings().demo_mode:
-        return _demo_reply(query=query, language=language), 120
+        text = _demo_reply(query=query, language=language)
+        if inject:
+            text = hallucinator.demo_corrupt(text, hallucination_type)
+        return text, 120
 
-    messages: list[AnyMessage] = [cached_system_message(system_prompt)]
+    system = system_prompt
+    if inject:
+        system = f"{system_prompt}\n\n{hallucinator.injection_system(hallucination_type)}"
+    messages: list[AnyMessage] = [cached_system_message(system)]
     for role, content in history[-_HISTORY_LIMIT:]:
         messages.append(
             HumanMessage(content=content) if role == "user" else AIMessage(content=content)
@@ -113,7 +126,7 @@ async def generate_reply(
 
 
 # Demo response marker (in the language's comment style) so a corrupting hallucinator pass has a
-# deterministic line to mutate (see hallucinator._demo_corrupt).
+# deterministic line to mutate (see hallucinator.demo_corrupt).
 _DEMO_SNIPPET = "result = total // count  # average"
 
 

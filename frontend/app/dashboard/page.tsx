@@ -14,7 +14,7 @@ const FILTERS: ("all" | SessionStatus)[] = ["all", "active", "pending", "ended"]
 
 // Interviewer home — sidebar nav, 4-stat row (mock), live-session callout (real
 // active session if any), filterable sessions table (real), and a side column
-// with Quick start + Recent activity (mock). See plan.md §9b for the mock items.
+// with Quick start + Recent activity (mock).
 export default function DashboardHome() {
   const [me, setMe] = useState<Profile | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -90,7 +90,7 @@ export default function DashboardHome() {
         </header>
 
         {/* Header row: my tokens + shared API balance | separator | schedule calendar.
-            Both stat tiles are mock per plan.md §9b — we don't yet aggregate Anthropic
+            Both stat tiles are mock — we don't yet aggregate Anthropic
             usage per-user and there's no billing API integration. */}
         <div
           className="mt-8 grid items-stretch gap-6"

@@ -9,7 +9,7 @@ Cost-optimized per the team's constraints:
   off automatically if prompts grow. The effective cost levers today are the cheap model, the
   token cap, and capping chat history (see services/agent.py).
 
-We use `langchain-anthropic` (locked decision, plan.md §3); keep this module thin so the model
+We use `langchain-anthropic` (locked decision); keep this module thin so the model
 layer stays swappable.
 """
 

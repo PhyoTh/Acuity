@@ -3,7 +3,7 @@
 `WS /ws/sessions/{session_id}?token=<supabase_jwt>`:
   - authenticates via the Supabase JWT, verifies the caller is a session participant,
   - bridges the socket to the Redis `session:{id}` channel (fan-out to the other party),
-  - routes inbound events (plan.md §5).
+  - routes inbound events (see CLAUDE.md).
 
 On chat_message: budget check -> agent -> hallucinator -> telemetry -> broadcast ai_response,
 then INCRBY the session's Redis token counter with the call's usage and emit a `token_budget`
@@ -388,7 +388,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
         listener.cancel()
         # SREM + rebroadcast so the other side sees the candidate disappear in real time.
         # Without this the participants list still showed everyone who'd ever joined, even
-        # after they closed their tab — see plan.md §7c notes.
+        # after they closed their tab.
         await get_redis().srem(_connected_key(session_id), profile_id)  # type: ignore[misc]
         await publish(channel, {"type": "presence", "payload": {actor: False}})
         await _broadcast_participants(channel, session_uuid)
@@ -576,16 +576,16 @@ async def _handle_client_message(
             session_cfg.get("guardrail_presets") or session_cfg["guardrail_preset"],
             session_cfg["guardrail_custom"],
         )
-        reply, used_tokens = await agent.generate_reply(
+        # Decide up front whether this turn is corrupted, then fold the injection into the agent's
+        # single generation call — a hallucinated turn costs one model call, not two.
+        was_hallucinated = hallucinator.should_inject(int(session_cfg["hallucination_pct"]))
+        final, used_tokens = await agent.generate_reply(
             query=content,
             code=code,
             language=session_cfg["language"],
             system_prompt=system_prompt,
             history=history,
-        )
-        final, was_hallucinated = await hallucinator.maybe_inject(
-            answer=reply,
-            probability=int(session_cfg["hallucination_pct"]),
+            inject=was_hallucinated,
             hallucination_type=str(session_cfg.get("hallucination_type") or "mixed"),
         )
         await telemetry.record_transcript(

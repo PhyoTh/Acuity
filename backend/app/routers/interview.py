@@ -1,7 +1,7 @@
 """Interview/session router.
 
 Interviewer creates a session (problem + AI config) and gets a shareable `join_code`; a candidate
-joins by code (invite flow). See plan.md §4 (data model) and §6 (tasks).
+joins by code (invite flow). See CLAUDE.md for the data model.
 """
 
 from __future__ import annotations

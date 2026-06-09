@@ -1,5 +1,5 @@
 // Mock data for surfaces depicted in ROADMAP.md that we don't have backend
-// support for yet. See plan.md §9b for the full list of unwired surfaces.
+// support for yet.
 // Anything imported from this file is NOT live data — treat it as decoration
 // until the corresponding backend lands.
 
@@ -35,7 +35,7 @@ export const STATS = {
   tokensSpent:      { value: "84.2K", sub: "$0.32 est.",              spark: [8, 12, 10, 18, 22, 28, 32, 42, 48, 56, 64, 72, 84] },
 };
 
-// Per-interviewer + shared-team Anthropic usage. Both are mock per plan.md §9b — we
+// Per-interviewer + shared-team Anthropic usage. Both are mock — we
 // don't aggregate usage by user yet, and there is no Anthropic billing API integration.
 export const TOKENS_MINE = {
   value: "12.4K",

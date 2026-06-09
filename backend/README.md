@@ -1,7 +1,7 @@
 # Acuity Backend
 
 FastAPI real-time gateway + AI services. See the repo root [CLAUDE.md](../CLAUDE.md) for
-conventions and [plan.md](../plan.md) for the roadmap.
+conventions and [CLAUDE.md](../CLAUDE.md) for the roadmap.
 
 ## Run
 

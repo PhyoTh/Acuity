@@ -32,8 +32,8 @@ whether candidates *critically evaluate* AI output instead of copying it.
   tables are managed by our own Alembic migrations and live beside Supabase's `auth` schema.
 - **Infra:** Redis + Postgres locally via Docker. Prod: Postgres + Auth on Supabase; the app
   (backend + Redis + frontend + Caddy for HTTPS/`wss`) self-hosted on a free Oracle Cloud
-  Always-Free VM via `docker-compose.prod.yml` (see `DEPLOY.md`). A `render.yaml` blueprint is
-  kept as a paid managed alternative.
+  Always-Free VM via `docker-compose.prod.yml` (see `DEPLOY.md`). Auto-deploys on push to `main`
+  via `.github/workflows/deploy.yml`.
 - **Model:** all LLM calls go through Claude via `langchain-anthropic`; the model id is env-driven
   (`ANTHROPIC_MODEL`). AI is cost-optimized: cheap default model, capped `max_tokens`, capped
   chat history.
@@ -250,13 +250,16 @@ URL: **`WS /ws/sessions/{session_id}?token=<jwt>`**.
 - **Real-time flow:** candidate IDE → WS → FastAPI gateway publishes to `session:{id}` (Redis) →
   all session subscribers (interviewer dashboard) receive identical state. Code changes are
   debounced client-side and the diffs are logged asynchronously to `events`.
-- **AI chain:** `agent.py` (LangGraph + Claude, conditioned on current code + session guardrails)
-  produces an answer → `hallucinator.py` rolls against `hallucination_pct` and, if it hits, does a
-  second Claude pass to subtly corrupt it → the turn is stored in `transcripts` with
-  `was_hallucinated` → streamed back as `ai_response`. The interviewer also picks a
-  `hallucination_type` (`mixed` / `logic_error` / `wrong_api` / `edge_case` / `inefficiency` /
-  `security`, in `hallucinator.HALLUCINATION_TYPES`) which selects the rewrite clause so the
-  injected flaw matches what the interview tests. `agent.generate_reply` returns
+- **AI chain:** the WS handler rolls once via `hallucinator.should_inject(hallucination_pct)`. If
+  it hits, the hallucination instruction (`hallucinator.injection_system(type)`) is folded into the
+  agent's system prompt so its **single** Claude call produces a subtly-flawed answer (one model
+  call per turn, not two — a deliberate cost choice). `agent.py` (LangGraph + Claude, conditioned on
+  current code + session guardrails) produces the answer → the turn is stored in `transcripts` with
+  `was_hallucinated` → streamed back as `ai_response`. The interviewer picks a `hallucination_type`
+  (`mixed` / `logic_error` / `wrong_api` / `edge_case` / `inefficiency` / `security`, in
+  `hallucinator.HALLUCINATION_TYPES`) which selects the injection clause so the flaw matches what
+  the interview tests. In demo mode the corruption is applied deterministically by
+  `hallucinator.demo_corrupt`. `agent.generate_reply` returns
   `(text, tokens_used)` so the WS handler can accumulate usage. The user-message template
   branches: a single buffer is wrapped as `My current <lang> code:\n```...```; a multi-file
   payload (detected by `--- path ---` headers) is wrapped as a labeled project tree so Claude
