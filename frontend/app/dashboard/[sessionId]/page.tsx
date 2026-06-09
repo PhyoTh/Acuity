@@ -66,6 +66,7 @@ export default function InterviewerSessionPage() {
   const [aiModel, setAiModel] = useState<string>("");
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
   const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
+  const [hasCustomGuardrail, setHasCustomGuardrail] = useState<boolean>(false);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
   const [hallucinationType, setHallucinationType] = useState<string>("mixed");
   const [title, setTitle] = useState<string>("");
@@ -154,6 +155,9 @@ export default function InterviewerSessionPage() {
         if ("guardrail_preset" in interview) setGuardrailPreset(interview.guardrail_preset);
         if ("guardrail_presets" in interview && Array.isArray(interview.guardrail_presets)) {
           setGuardrailPresets(interview.guardrail_presets);
+        }
+        if ("guardrail_custom" in interview) {
+          setHasCustomGuardrail(Boolean(interview.guardrail_custom?.trim()));
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
         if ("hallucination_type" in interview) setHallucinationType(interview.hallucination_type);
@@ -489,6 +493,7 @@ export default function InterviewerSessionPage() {
                   model={aiModel}
                   guardrailPreset={guardrailPreset}
                   guardrailPresets={guardrailPresets}
+                  hasCustomGuardrail={hasCustomGuardrail}
                   hallucinationPct={hallucinationPct}
                   hallucinationType={hallucinationType}
                 />

@@ -181,6 +181,7 @@ export interface SessionCandidateView {
   status: SessionStatus;
   guardrail_preset: string;
   guardrail_presets: string[];
+  has_custom_guardrail: boolean;
   hallucination_pct: number;
   hallucination_type: string;
   ai_model: string;

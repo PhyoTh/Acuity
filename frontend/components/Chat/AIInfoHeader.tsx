@@ -18,12 +18,14 @@ export default function AIInfoHeader({
   model,
   guardrailPreset,
   guardrailPresets,
+  hasCustomGuardrail,
   hallucinationPct,
   hallucinationType,
 }: {
   model?: string;
   guardrailPreset?: string;
   guardrailPresets?: string[];
+  hasCustomGuardrail?: boolean;
   hallucinationPct?: number;
   hallucinationType?: string;
 }) {
@@ -33,7 +35,13 @@ export default function AIInfoHeader({
       : guardrailPreset
         ? [guardrailPreset]
         : [];
-  if (!model && activePresets.length === 0 && (hallucinationPct ?? 0) === 0) return null;
+  if (
+    !model &&
+    activePresets.length === 0 &&
+    !hasCustomGuardrail &&
+    (hallucinationPct ?? 0) === 0
+  )
+    return null;
 
   const presetLabel = activePresets.length
     ? activePresets.map((p) => PRESET_LABELS[p] ?? p).join(" + ")
@@ -49,6 +57,14 @@ export default function AIInfoHeader({
       {presetLabel && (
         <div>
           Guardrail: <span className="text-neutral-300">{presetLabel}</span>
+          {hasCustomGuardrail && (
+            <span className="text-neutral-300"> + additional custom instructions apply</span>
+          )}
+        </div>
+      )}
+      {!presetLabel && hasCustomGuardrail && (
+        <div>
+          Guardrail: <span className="text-neutral-300">additional custom instructions apply</span>
         </div>
       )}
       {(hallucinationPct ?? 0) > 0 && (

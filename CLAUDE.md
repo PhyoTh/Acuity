@@ -366,6 +366,9 @@ The full interview loop is implemented and statically verified (ruff, mypy stric
   is rejected instead of bypassing the waiting room.
 - **Interviewer-chosen hallucination type**: the injected flaw's *kind* is selectable per session
   (logic / wrong-API / edge-case / inefficiency / security / mixed).
+- **Guardrail transparency on the candidate chat**: the AI header tells the candidate when extra
+  custom rules apply (`SessionCandidateView.has_custom_guardrail`) — a generic note only, never the
+  interviewer's free-text wording.
 
 **Not yet built (the UI promises these; backend pending):**
 - **Custom guardrail presets** — a user/team-scoped `guardrail_library` (name + free-text policy)

@@ -66,6 +66,7 @@ export default function CandidateSessionPage() {
   const [aiModel, setAiModel] = useState<string>("");
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
   const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
+  const [hasCustomGuardrail, setHasCustomGuardrail] = useState<boolean>(false);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
   const [title, setTitle] = useState<string>("");
   const [joinCode, setJoinCode] = useState<string>("");
@@ -139,6 +140,9 @@ export default function CandidateSessionPage() {
         if ("guardrail_preset" in interview) setGuardrailPreset(interview.guardrail_preset);
         if ("guardrail_presets" in interview && Array.isArray(interview.guardrail_presets)) {
           setGuardrailPresets(interview.guardrail_presets);
+        }
+        if ("has_custom_guardrail" in interview) {
+          setHasCustomGuardrail(Boolean(interview.has_custom_guardrail));
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
         if ("title" in interview) setTitle(interview.title);
@@ -749,6 +753,7 @@ export default function CandidateSessionPage() {
                 model={aiModel}
                 guardrailPreset={guardrailPreset}
                 guardrailPresets={guardrailPresets}
+                hasCustomGuardrail={hasCustomGuardrail}
                 hallucinationPct={hallucinationPct}
               />
               <div className="flex-1 overflow-hidden">

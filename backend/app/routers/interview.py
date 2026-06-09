@@ -274,6 +274,7 @@ async def get_session_view(
         return out
     cv = SessionCandidateView.model_validate(interview)
     cv.ai_model = model_name
+    cv.has_custom_guardrail = bool((interview.guardrail_custom or "").strip())
     return cv
 
 

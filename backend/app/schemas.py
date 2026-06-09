@@ -205,6 +205,10 @@ class SessionCandidateView(BaseModel):
     status: SessionStatus
     guardrail_preset: str = ""
     guardrail_presets: list[str] = Field(default_factory=list)
+    # Whether the interviewer set a free-text custom guardrail. The candidate is told *that*
+    # extra rules apply (so the AI's behavior isn't surprising) but never the text itself, which
+    # may contain interviewer-only steering notes.
+    has_custom_guardrail: bool = False
     hallucination_pct: int = 0
     hallucination_type: str = "mixed"
     ai_model: str = ""
