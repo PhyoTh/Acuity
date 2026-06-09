@@ -4,6 +4,8 @@
 // answering, what guardrail is active, and whether the hallucination injector is enabled.
 // Candidates should never be surprised by "the AI made things up" — if hallucination > 0,
 // we say so up-front.
+import { HALLUCINATION_TYPE_LABELS } from "@/lib/types";
+
 const PRESET_LABELS: Record<string, string> = {
   hints_only: "Hints only",
   no_full_solutions: "No full solutions",
@@ -17,11 +19,13 @@ export default function AIInfoHeader({
   guardrailPreset,
   guardrailPresets,
   hallucinationPct,
+  hallucinationType,
 }: {
   model?: string;
   guardrailPreset?: string;
   guardrailPresets?: string[];
   hallucinationPct?: number;
+  hallucinationType?: string;
 }) {
   const activePresets =
     guardrailPresets && guardrailPresets.length > 0
@@ -51,6 +55,12 @@ export default function AIInfoHeader({
         <div className="text-amber-300">
           ⚠ Hallucination injector ON ({hallucinationPct}% of replies are deliberately corrupted —
           double-check the AI&apos;s answers).
+          {hallucinationType && (
+            <span className="text-neutral-400">
+              {" "}
+              Type: {HALLUCINATION_TYPE_LABELS[hallucinationType] ?? hallucinationType}.
+            </span>
+          )}
         </div>
       )}
     </div>

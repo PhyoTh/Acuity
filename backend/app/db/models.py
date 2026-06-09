@@ -105,6 +105,11 @@ class InterviewSession(Base):
     )
     guardrail_custom: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hallucination_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Which kind of flaw the injector introduces when a roll hits (see services.hallucinator
+    # HALLUCINATION_TYPES). "mixed" preserves the original any-subtle-flaw behavior.
+    hallucination_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default="mixed", default="mixed"
+    )
 
     # test_cases: list of {stdin, expected, hidden} run by the code-execution sandbox
     test_cases: Mapped[list[dict[str, Any]]] = mapped_column(

@@ -34,9 +34,7 @@ async def record_event(
 ) -> None:
     async with SessionLocal() as db:
         db.add(
-            Event(
-                session_id=uuid.UUID(session_id), actor=actor, type=event_type, payload=payload
-            )
+            Event(session_id=uuid.UUID(session_id), actor=actor, type=event_type, payload=payload)
         )
         await db.commit()
 

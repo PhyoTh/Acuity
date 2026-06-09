@@ -45,7 +45,7 @@ def _ls(files: dict[str, str], path: str) -> str:
     for p in files.keys():
         if not p.startswith(prefix):
             continue
-        rest = p[len(prefix):]
+        rest = p[len(prefix) :]
         names.add(rest.split("/")[0])
     return "\n".join(sorted(names))
 
@@ -126,7 +126,5 @@ async def execute(
     if entry not in files:
         return {"stdout": "", "stderr": f"{cmd}: {entry}: No such file", "code": "1"}
 
-    out = await executor.run_code(
-        language=language, files=files, entry=entry, stdin=stdin
-    )
+    out = await executor.run_code(language=language, files=files, entry=entry, stdin=stdin)
     return out

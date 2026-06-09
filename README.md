@@ -35,6 +35,9 @@ an LLM generates a structured **scorecard** from the recorded transcript and tel
   participants popover.
 - **Two-phase end-interview.** The session flips to summary mode immediately; Claude generates the
   scorecard in the background and emits `scorecard_ready` when finished.
+- **Interviewer-chosen hallucination type.** Beyond the probability, the interviewer picks *what
+  kind* of flaw the injector introduces (logic / off-by-one, wrong API, edge case, inefficiency,
+  security, or mixed) to match what the interview should test.
 
 ## Stack
 

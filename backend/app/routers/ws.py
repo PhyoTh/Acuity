@@ -327,6 +327,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
             "guardrail_presets": list(interview.guardrail_presets or [interview.guardrail_preset]),
             "guardrail_custom": interview.guardrail_custom,
             "hallucination_pct": interview.hallucination_pct,
+            "hallucination_type": interview.hallucination_type,
             "token_budget": interview.token_budget,
             "enable_pushback": interview.enable_pushback,
         }
@@ -348,9 +349,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     raw_budget = session_cfg.get("token_budget") or 0
     initial_budget = int(raw_budget) if isinstance(raw_budget, int) else 0
     participants = await _participants_payload(session_uuid)
-    await websocket.send_json(
-        {"type": "participants", "payload": {"participants": participants}}
-    )
+    await websocket.send_json({"type": "participants", "payload": {"participants": participants}})
     # Re-hydrate the candidate's editor with the latest code from the event log so a refresh
     # or accidental tab-close doesn't lose their work. Multi-file sessions already rehydrate
     # from `session_files`; this only fires for single-file mode.
@@ -585,7 +584,9 @@ async def _handle_client_message(
             history=history,
         )
         final, was_hallucinated = await hallucinator.maybe_inject(
-            answer=reply, probability=int(session_cfg["hallucination_pct"])
+            answer=reply,
+            probability=int(session_cfg["hallucination_pct"]),
+            hallucination_type=str(session_cfg.get("hallucination_type") or "mixed"),
         )
         await telemetry.record_transcript(
             session_id=session_id,

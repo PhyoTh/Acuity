@@ -54,6 +54,7 @@ export default function InterviewerSessionPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [bootReady, setBootReady] = useState(false);
   const [nameReady, setNameReady] = useState(false);
   const [defaultName, setDefaultName] = useState("");
   const [ended, setEnded] = useState(false);
@@ -66,6 +67,7 @@ export default function InterviewerSessionPage() {
   const [guardrailPreset, setGuardrailPreset] = useState<string>("");
   const [guardrailPresets, setGuardrailPresets] = useState<string[]>([]);
   const [hallucinationPct, setHallucinationPct] = useState<number>(0);
+  const [hallucinationType, setHallucinationType] = useState<string>("mixed");
   const [title, setTitle] = useState<string>("");
   const [createdAt, setCreatedAt] = useState<string>("");
   const [endedAt, setEndedAt] = useState<string | null>(null);
@@ -154,6 +156,7 @@ export default function InterviewerSessionPage() {
           setGuardrailPresets(interview.guardrail_presets);
         }
         if ("hallucination_pct" in interview) setHallucinationPct(interview.hallucination_pct);
+        if ("hallucination_type" in interview) setHallucinationType(interview.hallucination_type);
         if ("join_code" in interview) setJoinCode(interview.join_code);
         if ("interview_type" in interview) setInterviewType(interview.interview_type);
         if ("status" in interview && interview.status === "ended") {
@@ -181,6 +184,7 @@ export default function InterviewerSessionPage() {
       const alreadyConfirmed = typeof window !== "undefined"
         && window.localStorage.getItem(nameConfirmedKey(sessionId)) === "1";
       if (alreadyConfirmed) setNameReady(true);
+      if (active) setBootReady(true);
     })();
     return () => {
       active = false;
@@ -307,14 +311,8 @@ export default function InterviewerSessionPage() {
     socketRef.current?.send("kick", { profile_id: profileId });
   }
 
-  if (!nameReady && token) {
-    return (
-      <DisplayNameModal
-        open
-        defaultName={defaultName}
-        onConfirm={confirmDisplayName}
-      />
-    );
+  if (!bootReady) {
+    return <main style={{ background: "var(--bg-0)", minHeight: "100vh" }} />;
   }
 
   if (ended) {
@@ -331,6 +329,16 @@ export default function InterviewerSessionPage() {
         scorecard={scorecard}
         scorecardLoading={scorecardLoading}
         events={summaryEvents}
+      />
+    );
+  }
+
+  if (!nameReady && token) {
+    return (
+      <DisplayNameModal
+        open
+        defaultName={defaultName}
+        onConfirm={confirmDisplayName}
       />
     );
   }
@@ -482,6 +490,7 @@ export default function InterviewerSessionPage() {
                   guardrailPreset={guardrailPreset}
                   guardrailPresets={guardrailPresets}
                   hallucinationPct={hallucinationPct}
+                  hallucinationType={hallucinationType}
                 />
               )}
               <div className="flex-1 overflow-hidden">

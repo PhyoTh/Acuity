@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import Role, SessionStatus
+from app.services.hallucinator import HALLUCINATION_TYPES as _HALLUCINATION_TYPE_DEFS
 
 GUARDRAIL_PRESETS = (
     "hints_only",
@@ -17,6 +18,9 @@ GUARDRAIL_PRESETS = (
     "syntax_only",
     "open",
 )
+
+# Allowed hallucination_type keys — sourced from the injector so the two never drift.
+HALLUCINATION_TYPES = tuple(_HALLUCINATION_TYPE_DEFS)
 
 # Interview kinds the wizard offers. The wizard pre-fills the AI behavior step from these defaults;
 # the interviewer can still override anything before saving. Frontend mirrors this list in
@@ -38,6 +42,7 @@ INTERVIEW_TYPES: dict[str, dict[str, Any]] = {
         "label": "Debugging",
         "guardrail_preset": "explain_dont_write",
         "hallucination_pct": 30,
+        "hallucination_type": "logic_error",
         "token_budget": 6000,
     },
     "code_review": {
@@ -147,6 +152,7 @@ class SessionCreate(BaseModel):
     guardrail_presets: list[str] = Field(default_factory=list)
     guardrail_custom: str = ""
     hallucination_pct: int = Field(default=0, ge=0, le=100)
+    hallucination_type: str = Field(default="mixed", max_length=40)
     test_cases: list[TestCase] = Field(default_factory=list)
     token_budget: int = Field(default=0, ge=0, le=200000)
     enable_pushback: bool = False
@@ -170,6 +176,7 @@ class SessionOut(BaseModel):
     guardrail_presets: list[str] = Field(default_factory=list)
     guardrail_custom: str
     hallucination_pct: int
+    hallucination_type: str
     test_cases: list[TestCase]
     token_budget: int
     enable_pushback: bool
@@ -199,6 +206,7 @@ class SessionCandidateView(BaseModel):
     guardrail_preset: str = ""
     guardrail_presets: list[str] = Field(default_factory=list)
     hallucination_pct: int = 0
+    hallucination_type: str = "mixed"
     ai_model: str = ""
 
 

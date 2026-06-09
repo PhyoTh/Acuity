@@ -87,11 +87,7 @@ def _wrap_call(language: str, code: str, call: str) -> str:
             "    raise SystemExit(1)\n"
         )
     if language in ("javascript", "typescript"):
-        return (
-            f"{code}\n\n"
-            "// --- Acuity test harness ---\n"
-            f"console.log(JSON.stringify(({call})));\n"
-        )
+        return f"{code}\n\n// --- Acuity test harness ---\nconsole.log(JSON.stringify(({call})));\n"
     return code
 
 

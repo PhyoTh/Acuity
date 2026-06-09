@@ -12,6 +12,28 @@ export const GUARDRAIL_PRESETS = [
 ] as const;
 export type GuardrailPreset = (typeof GUARDRAIL_PRESETS)[number];
 
+// Kinds of flaw the hallucination injector can introduce. Mirrors backend HALLUCINATION_TYPES
+// (services/hallucinator.py); keep the keys in sync. The interviewer picks one when the
+// hallucination probability is above 0.
+export const HALLUCINATION_TYPES = [
+  "mixed",
+  "logic_error",
+  "wrong_api",
+  "edge_case",
+  "inefficiency",
+  "security",
+] as const;
+export type HallucinationType = (typeof HALLUCINATION_TYPES)[number];
+
+export const HALLUCINATION_TYPE_LABELS: Record<string, string> = {
+  mixed: "Mixed (any subtle flaw)",
+  logic_error: "Logic / off-by-one error",
+  wrong_api: "Wrong API / method usage",
+  edge_case: "Silent edge-case failure",
+  inefficiency: "Hidden inefficiency",
+  security: "Security vulnerability",
+};
+
 // Interview kinds the wizard offers. Mirrors backend INTERVIEW_TYPES in schemas.py — keep these
 // two definitions in sync. The wizard pre-fills step 4 (AI behavior) from `defaults` here.
 export interface InterviewTypeDef {
@@ -21,6 +43,7 @@ export interface InterviewTypeDef {
   defaults: {
     guardrail_preset: GuardrailPreset;
     hallucination_pct: number;
+    hallucination_type: HallucinationType;
     token_budget: number;
   };
 }
@@ -31,51 +54,51 @@ export const INTERVIEW_TYPES: InterviewTypeDef[] = [
     label: "Algorithm / LeetCode",
     description:
       "Single algorithmic problem. AI restricted to syntax of the chosen language; no algorithm hints, no hallucinations.",
-    defaults: { guardrail_preset: "syntax_only", hallucination_pct: 0, token_budget: 4000 },
+    defaults: { guardrail_preset: "syntax_only", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 4000 },
   },
   {
     value: "api",
     label: "API integration",
     description:
       "Build a small flow with a real-world API (Stripe, Twilio, etc). AI gives hints, larger budget.",
-    defaults: { guardrail_preset: "hints_only", hallucination_pct: 0, token_budget: 12000 },
+    defaults: { guardrail_preset: "hints_only", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 12000 },
   },
   {
     value: "debugging",
     label: "Debugging",
     description:
       "Find and fix bugs in given code. High hallucination rate — the candidate must spot bad AI suggestions.",
-    defaults: { guardrail_preset: "explain_dont_write", hallucination_pct: 30, token_budget: 6000 },
+    defaults: { guardrail_preset: "explain_dont_write", hallucination_pct: 30, hallucination_type: "logic_error", token_budget: 6000 },
   },
   {
     value: "code_review",
     label: "Code review",
     description: "Critique a provided diff or function in prose. Open AI, graded on the review.",
-    defaults: { guardrail_preset: "open", hallucination_pct: 0, token_budget: 4000 },
+    defaults: { guardrail_preset: "open", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 4000 },
   },
   {
     value: "refactor",
     label: "Refactor / optimize",
     description: "Improve correct-but-slow / messy code. Hints only, tests verify same behavior.",
-    defaults: { guardrail_preset: "hints_only", hallucination_pct: 0, token_budget: 6000 },
+    defaults: { guardrail_preset: "hints_only", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 6000 },
   },
   {
     value: "sql",
     label: "SQL / data query",
     description: "Write a query against sample tables. Syntax-only AI; expected-output match.",
-    defaults: { guardrail_preset: "syntax_only", hallucination_pct: 0, token_budget: 3000 },
+    defaults: { guardrail_preset: "syntax_only", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 3000 },
   },
   {
     value: "tdd",
     label: "Test writing (TDD)",
     description: "Given a function, write tests for it. AI explains concepts but does not write code.",
-    defaults: { guardrail_preset: "explain_dont_write", hallucination_pct: 0, token_budget: 4000 },
+    defaults: { guardrail_preset: "explain_dont_write", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 4000 },
   },
   {
     value: "system_design",
     label: "System design",
     description: "Discuss architecture in writing. Open AI, large budget for back-and-forth.",
-    defaults: { guardrail_preset: "open", hallucination_pct: 0, token_budget: 20000 },
+    defaults: { guardrail_preset: "open", hallucination_pct: 0, hallucination_type: "mixed", token_budget: 20000 },
   },
 ];
 
@@ -137,6 +160,7 @@ export interface SessionConfig {
   guardrail_presets: string[];
   guardrail_custom: string;
   hallucination_pct: number;
+  hallucination_type: string;
   test_cases: TestCaseInput[];
   token_budget: number;
   enable_pushback: boolean;
@@ -158,6 +182,7 @@ export interface SessionCandidateView {
   guardrail_preset: string;
   guardrail_presets: string[];
   hallucination_pct: number;
+  hallucination_type: string;
   ai_model: string;
 }
 
@@ -215,6 +240,7 @@ export interface SessionCreateInput {
   guardrail_presets: string[];
   guardrail_custom: string;
   hallucination_pct: number;
+  hallucination_type: string;
   test_cases: TestCaseInput[];
   token_budget: number;
   enable_pushback: boolean;

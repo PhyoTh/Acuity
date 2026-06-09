@@ -103,8 +103,7 @@ async def generate_reply(
         )
     else:
         user_content = (
-            f"My current {language} code:\n```{language}\n{snippet}\n```\n\n"
-            f"Question: {query}"
+            f"My current {language} code:\n```{language}\n{snippet}\n```\n\nQuestion: {query}"
         )
     messages.append(HumanMessage(content=user_content))
 

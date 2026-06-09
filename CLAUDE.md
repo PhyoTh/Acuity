@@ -46,7 +46,7 @@ All tables live in the Supabase Postgres, managed by our Alembic migrations (Sup
 | Table | Purpose | Key columns |
 |---|---|---|
 | `profiles` | App-side user record mirroring an auth user + role | `id` (=auth uuid, PK), `role` (candidate/interviewer), `display_name` |
-| `interview_sessions` | One interview session + its config | `id`, `join_code`, `interviewer_code` (nullable; co-host link), `created_by`→profiles, `language`, `prompt`, `starting_code`, `interview_type`, `guardrail_preset`, `guardrail_presets` (jsonb), `guardrail_custom`, `hallucination_pct`, `test_cases` (jsonb), `token_budget`, `enable_pushback`, `status` (pending/active/ended), `created_at`, `ended_at` |
+| `interview_sessions` | One interview session + its config | `id`, `join_code`, `interviewer_code` (nullable; co-host link), `created_by`→profiles, `language`, `prompt`, `starting_code`, `interview_type`, `guardrail_preset`, `guardrail_presets` (jsonb), `guardrail_custom`, `hallucination_pct`, `hallucination_type`, `test_cases` (jsonb), `token_budget`, `enable_pushback`, `status` (pending/active/ended), `created_at`, `ended_at` |
 | `session_participants` | Who is in a session + as what | `session_id`, `profile_id`, `role`, `admitted`, `joined_at` |
 | `session_files` | Multi-file project per session | `id`, `session_id`, `path`, `content`, `is_folder` |
 | `events` | Append-only telemetry (code diffs, presence, flags) | `id`, `session_id`, `actor`, `type`, `payload` (jsonb), `created_at` |
@@ -68,7 +68,9 @@ independence.
 - `0006_multi_features` — adds `interview_sessions.guardrail_presets` (JSONB list), backfilled
   from the legacy singular `guardrail_preset` column for multi-select stacking
 - `0007_session_files` — adds `session_files` (multi-file projects per session)
-- `0008_interviewer_code` — adds `interview_sessions.interviewer_code` (nullable, unique;
+- `0008_hallucination_type` — adds `interview_sessions.hallucination_type` (which kind of flaw
+  the injector introduces; defaults to `mixed`)
+- `0009_interviewer_code` — adds `interview_sessions.interviewer_code` (nullable, unique;
   the optional co-interviewer invite link)
 
 ## Repo structure
@@ -248,7 +250,10 @@ URL: **`WS /ws/sessions/{session_id}?token=<jwt>`**.
 - **AI chain:** `agent.py` (LangGraph + Claude, conditioned on current code + session guardrails)
   produces an answer → `hallucinator.py` rolls against `hallucination_pct` and, if it hits, does a
   second Claude pass to subtly corrupt it → the turn is stored in `transcripts` with
-  `was_hallucinated` → streamed back as `ai_response`. `agent.generate_reply` returns
+  `was_hallucinated` → streamed back as `ai_response`. The interviewer also picks a
+  `hallucination_type` (`mixed` / `logic_error` / `wrong_api` / `edge_case` / `inefficiency` /
+  `security`, in `hallucinator.HALLUCINATION_TYPES`) which selects the rewrite clause so the
+  injected flaw matches what the interview tests. `agent.generate_reply` returns
   `(text, tokens_used)` so the WS handler can accumulate usage. The user-message template
   branches: a single buffer is wrapped as `My current <lang> code:\n```...```; a multi-file
   payload (detected by `--- path ---` headers) is wrapped as a labeled project tree so Claude
@@ -359,6 +364,8 @@ The full interview loop is implemented and statically verified (ruff, mypy stric
   credentials — canned LLM responses + credential-free `POST /auth/demo-login` tokens.
 - **Role-bound invite links**: separate candidate / co-interviewer codes; a wrong-account joiner
   is rejected instead of bypassing the waiting room.
+- **Interviewer-chosen hallucination type**: the injected flaw's *kind* is selectable per session
+  (logic / wrong-API / edge-case / inefficiency / security / mixed).
 
 **Not yet built (the UI promises these; backend pending):**
 - **Custom guardrail presets** — a user/team-scoped `guardrail_library` (name + free-text policy)

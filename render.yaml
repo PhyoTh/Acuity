@@ -1,0 +1,87 @@
+# Acuity — Render Blueprint (all-Render deploy).
+# Three services: FastAPI backend (Docker), Next.js frontend (Node), Redis/Key Value.
+# Postgres + Auth stay on Supabase (external) — not defined here.
+#
+# First deploy:  Render Dashboard → New → Blueprint → pick this repo.
+# Then fill every `sync: false` var (marked below) in each service's Environment tab.
+# URLs are predictable once names are taken: https://<name>.onrender.com
+#
+# NOTE: free instances spin down when idle — bad for a live interview + WebSockets.
+# Use `starter` (or higher) so the socket gateway stays warm.
+
+services:
+  # ------------------------------------------------------------------ backend
+  - type: web
+    name: acuity-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    region: oregon                 # keep all three services in the SAME region
+    healthCheckPath: /health
+    # Apply DB migrations before each release goes live (Alembic, 0001..0007).
+    preDeployCommand: "alembic upgrade head"
+    envVars:
+      # --- Supabase Postgres: use the POOLER connection string, asyncpg dialect ---
+      # postgresql+asyncpg://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:6543/postgres
+      - key: DATABASE_URL
+        sync: false
+      # --- Supabase Auth (server-side keys; never exposed to the browser) ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      # --- Anthropic ---
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5-20251001
+      # --- Redis: auto-wired from the Key Value service below ---
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: acuity-redis
+          property: connectionString
+      # --- CORS: the frontend's public origin. Set after first deploy, e.g.
+      #     https://acuity-frontend.onrender.com  (must include the scheme) ---
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+  # ----------------------------------------------------------------- frontend
+  - type: web
+    name: acuity-frontend
+    runtime: node
+    rootDir: frontend
+    plan: starter
+    region: oregon
+    buildCommand: "corepack enable && pnpm install --frozen-lockfile && pnpm build"
+    startCommand: "pnpm start"
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # NEXT_PUBLIC_* are inlined into the client bundle at BUILD time.
+      # Changing any of these requires a REBUILD (Manual Deploy → Clear cache), not just a restart.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      # Point at the backend service, e.g. https://acuity-backend.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      # Same host, wss scheme, e.g. wss://acuity-backend.onrender.com
+      - key: NEXT_PUBLIC_WS_URL
+        sync: false
+
+  # --------------------------------------------------------- redis / key value
+  - type: redis
+    name: acuity-redis
+    plan: starter                  # free Redis was retired; starter persists data
+    region: oregon
+    # Token budgets, presence sets, and pub/sub must not be evicted.
+    maxmemoryPolicy: noeviction
+    # Empty allow-list = internal-only; only Render services in this project connect.
+    ipAllowList: []
