@@ -1,17 +1,14 @@
 # Acuity
 
-**Live demo: https://acuity-phyo.duckdns.org** · [Demo video](https://www.youtube.com/watch?v=ULcqjiKwaZw)
+Site: https://acuity-phyo.duckdns.org
+
+Initial Demo Video: https://www.youtube.com/watch?v=ULcqjiKwaZw
+
+Final Demo Video: https://youtu.be/CkgukYmBdmM
 
 A **live technical-interview platform**. A candidate solves a coding problem in a Monaco IDE with
 an embedded **AI assistant**, while an interviewer silently watches a **real-time telemetry +
 evaluation dashboard**.
-
-The defining feature is a **Hallucination Injector**: with an interviewer-configured probability,
-the AI's correct output is subtly rewritten to contain plausible flaws — so the interview measures
-whether candidates *critically evaluate* AI rather than blindly copy it. When the interview ends,
-an LLM generates a structured **scorecard** from the recorded transcript and telemetry.
-
-— Sithu Soe (A17342422) · Phyo Thant (A18498144)
 
 ## Features
 
