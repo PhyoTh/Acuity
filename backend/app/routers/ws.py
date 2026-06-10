@@ -188,8 +188,9 @@ async def _pump_redis_to_ws(channel: str, websocket: WebSocket, is_interviewer: 
             if mtype == "pushback":
                 continue
             if mtype == "ai_response":
+                _hidden = {"was_hallucinated", "hallucination_note", "hallucination_snippet"}
                 payload = {
-                    k: v for k, v in message.get("payload", {}).items() if k != "was_hallucinated"
+                    k: v for k, v in message.get("payload", {}).items() if k not in _hidden
                 }
                 message = {**message, "payload": payload}
         await websocket.send_json(message)
@@ -579,7 +580,7 @@ async def _handle_client_message(
         # Decide up front whether this turn is corrupted, then fold the injection into the agent's
         # single generation call — a hallucinated turn costs one model call, not two.
         was_hallucinated = hallucinator.should_inject(int(session_cfg["hallucination_pct"]))
-        final, used_tokens = await agent.generate_reply(
+        final, used_tokens, flaw_note, flaw_snippet = await agent.generate_reply(
             query=content,
             code=code,
             language=session_cfg["language"],
@@ -599,11 +600,19 @@ async def _handle_client_message(
             r = get_redis()
             await r.incrby(_tokens_key(session_id), used_tokens)
             await r.expire(_tokens_key(session_id), 86400)
+        # `hallucination_note` + `hallucination_snippet` ride along for the interviewer (what the
+        # injected flaw is and where). They are stripped from the candidate's socket below, like
+        # `was_hallucinated`.
         await publish(
             channel,
             {
                 "type": "ai_response",
-                "payload": {"content": final, "was_hallucinated": was_hallucinated},
+                "payload": {
+                    "content": final,
+                    "was_hallucinated": was_hallucinated,
+                    "hallucination_note": flaw_note,
+                    "hallucination_snippet": flaw_snippet,
+                },
             },
         )
         await _broadcast_budget(channel, session_id, budget)

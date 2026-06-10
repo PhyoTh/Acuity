@@ -250,20 +250,23 @@ URL: **`WS /ws/sessions/{session_id}?token=<jwt>`**.
 - **Real-time flow:** candidate IDE → WS → FastAPI gateway publishes to `session:{id}` (Redis) →
   all session subscribers (interviewer dashboard) receive identical state. Code changes are
   debounced client-side and the diffs are logged asynchronously to `events`.
-- **AI chain:** the WS handler rolls once via `hallucinator.should_inject(hallucination_pct)`. If
-  it hits, the hallucination instruction (`hallucinator.injection_system(type)`) is folded into the
-  agent's system prompt so its **single** Claude call produces a subtly-flawed answer (one model
-  call per turn, not two — a deliberate cost choice). `agent.py` (LangGraph + Claude, conditioned on
-  current code + session guardrails) produces the answer → the turn is stored in `transcripts` with
-  `was_hallucinated` → streamed back as `ai_response`. The interviewer picks a `hallucination_type`
+- **AI chain:** the WS handler rolls once via `hallucinator.should_inject(hallucination_pct)`.
+  On a **clean** turn `agent.generate_reply` runs the normal LangGraph node (one Claude call). On
+  a **corrupted** turn it instead makes ONE *structured* call: `hallucinator.injection_directive(type)`
+  is folded into the system prompt and the model must return a `_FlawedReply`
+  (`answer` with the flaw baked in, `flaw` = a one-line description, `flawed_snippet` = the exact
+  wrong text). Forcing the structured `flaw` field makes the model actually introduce a real
+  mistake instead of quietly answering correctly — and gives the interviewer something to point at.
+  Either way it's **one** model call per turn (not the old generate-then-rewrite two-pass). The turn
+  is stored in `transcripts` with `was_hallucinated` and streamed as `ai_response`; the
+  `hallucination_note` + `hallucination_snippet` ride along to the interviewer and are **stripped
+  from the candidate's socket** in `_pump_redis_to_ws`. The interviewer picks a `hallucination_type`
   (`mixed` / `logic_error` / `wrong_api` / `edge_case` / `inefficiency` / `security`, in
-  `hallucinator.HALLUCINATION_TYPES`) which selects the injection clause so the flaw matches what
-  the interview tests. In demo mode the corruption is applied deterministically by
+  `hallucinator.HALLUCINATION_TYPES`). In demo mode the corruption is applied deterministically by
   `hallucinator.demo_corrupt`. `agent.generate_reply` returns
-  `(text, tokens_used)` so the WS handler can accumulate usage. The user-message template
-  branches: a single buffer is wrapped as `My current <lang> code:\n```...```; a multi-file
-  payload (detected by `--- path ---` headers) is wrapped as a labeled project tree so Claude
-  knows it can answer questions across files.
+  `(text, tokens_used, flaw_note, flaw_snippet)`. The user-message template branches: a single
+  buffer is wrapped as `My current <lang> code:\n```...```; a multi-file payload (detected by
+  `--- path ---` headers) is wrapped as a labeled project tree so Claude can answer across files.
 - **Multi-select guardrails:** `build_guardrail_system` accepts either a single preset string
   (legacy) or a list. Stacked presets are appended as separate "Guardrail:" clauses so the
   strictest constraints naturally compose. The DB stores both `guardrail_preset` (singular,

@@ -18,6 +18,7 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.services import hallucinator
@@ -25,6 +26,25 @@ from app.services.llm import cached_system_message, get_chat_model, message_text
 
 # How many prior turns to send back to the model (cost control).
 _HISTORY_LIMIT = 12
+
+
+class _FlawedReply(BaseModel):
+    """Structured shape for a hallucinated turn. One model call returns the candidate-facing
+    answer (with the flaw baked in) plus an interviewer-only description of what's wrong."""
+
+    answer: str = Field(
+        description="Your full reply to the candidate. It MUST contain exactly one subtle, "
+        "plausible flaw of the requested kind. Never mention or hint that anything is wrong."
+    )
+    flaw: str = Field(
+        description="One sentence, for the interviewer only, naming the specific flaw you put "
+        "in `answer` and why it is wrong."
+    )
+    flawed_snippet: str = Field(
+        default="",
+        description="The exact short substring of `answer` that contains the flaw, copied "
+        "verbatim, so the interviewer UI can point to it.",
+    )
 
 
 class _AgentState(TypedDict):
@@ -74,25 +94,27 @@ async def generate_reply(
     history: list[tuple[str, str]],
     inject: bool = False,
     hallucination_type: str = "mixed",
-) -> tuple[str, int]:
-    """Return (assistant_reply_text, tokens_used_in_this_call).
+) -> tuple[str, int, str, str]:
+    """Return (reply_text, tokens_used, flaw_note, flaw_snippet).
 
-    Tokens used = input_tokens + output_tokens reported by Anthropic for this single call. The
-    caller (ws.py) accumulates this in Redis against the session's `token_budget`.
+    `flaw_note` + `flaw_snippet` are empty unless `inject` is true. Tokens used = input + output
+    tokens for the single call; the caller (ws.py) accumulates them against the `token_budget`.
 
-    When `inject` is true the hallucination instruction is folded into THIS call's system prompt so
-    the model produces a subtly-flawed answer directly — no separate corruption pass (one model
-    call instead of two on a hallucinated turn).
+    When `inject` is true the corruption is folded into THIS single call: the model is asked, via
+    structured output, to return a subtly-flawed answer plus a description of the flaw (one model
+    call, not two). Forcing the structured `flaw` field makes the model actually introduce a real
+    mistake instead of quietly answering correctly, and gives the interviewer something to point at.
     """
     if get_settings().demo_mode:
         text = _demo_reply(query=query, language=language)
         if inject:
-            text = hallucinator.demo_corrupt(text, hallucination_type)
-        return text, 120
+            text, snippet = hallucinator.demo_corrupt(text, hallucination_type)
+            return text, 120, hallucinator.flaw_label(hallucination_type), snippet
+        return text, 120, "", ""
 
     system = system_prompt
     if inject:
-        system = f"{system_prompt}\n\n{hallucinator.injection_system(hallucination_type)}"
+        system = f"{system_prompt}\n\n{hallucinator.injection_directive(hallucination_type)}"
     messages: list[AnyMessage] = [cached_system_message(system)]
     for role, content in history[-_HISTORY_LIMIT:]:
         messages.append(
@@ -120,9 +142,23 @@ async def generate_reply(
         )
     messages.append(HumanMessage(content=user_content))
 
+    if inject:
+        # Structured single call: the model must fill `answer` (flawed) + `flaw` (description).
+        model = get_chat_model(temperature=0.8).with_structured_output(
+            _FlawedReply, include_raw=True
+        )
+        res: Any = await model.ainvoke(messages)
+        raw = res.get("raw") if isinstance(res, dict) else None
+        parsed = res.get("parsed") if isinstance(res, dict) else None
+        tokens = _usage_tokens(raw)
+        if isinstance(parsed, _FlawedReply):
+            return parsed.answer, tokens, parsed.flaw, parsed.flawed_snippet
+        # Parsing failed — fall back to the raw text, still flagged but without a note.
+        return (message_text(raw) if raw is not None else ""), tokens, "", ""
+
     state = await _get_graph().ainvoke({"messages": messages})
     last = state["messages"][-1]
-    return message_text(last), _usage_tokens(last)
+    return message_text(last), _usage_tokens(last), "", ""
 
 
 # Demo response marker (in the language's comment style) so a corrupting hallucinator pass has a

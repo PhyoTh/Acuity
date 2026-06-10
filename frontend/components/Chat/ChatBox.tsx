@@ -8,6 +8,10 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   was_hallucinated?: boolean;
+  // Interviewer-only: what the injected flaw is and the exact wrong snippet (never sent to the
+  // candidate). Present only on hallucinated turns when the model reported them.
+  hallucination_note?: string;
+  hallucination_snippet?: string;
 }
 
 // Chat transcript + composer. Used live by the candidate and read-only on the interviewer dashboard.
@@ -64,8 +68,19 @@ export default function ChatBox({
               )}
             </div>
             {m.was_hallucinated && (
-              <div className="mt-1 text-xs font-semibold text-amber-400">
-                flagged: hallucinated
+              <div className="mt-1 space-y-1 text-left">
+                <div className="text-xs font-semibold text-amber-400">flagged: hallucinated</div>
+                {m.hallucination_note && (
+                  <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+                    <span className="font-semibold">Injected flaw:</span> {m.hallucination_note}
+                    {m.hallucination_snippet && (
+                      <div className="mt-0.5">
+                        <span className="font-semibold">Look at:</span>{" "}
+                        <code className="rounded bg-black/30 px-1">{m.hallucination_snippet}</code>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

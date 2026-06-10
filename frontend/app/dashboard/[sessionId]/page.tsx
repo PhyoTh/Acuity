@@ -211,10 +211,21 @@ export default function InterviewerSessionPage() {
         setMessages((m) => [...m, { role: "user", content: p.content }]);
         setAiBusy(true);
       } else if (e.type === "ai_response") {
-        const p = e.payload as { content: string; was_hallucinated?: boolean };
+        const p = e.payload as {
+          content: string;
+          was_hallucinated?: boolean;
+          hallucination_note?: string;
+          hallucination_snippet?: string;
+        };
         setMessages((m) => [
           ...m,
-          { role: "assistant", content: p.content, was_hallucinated: p.was_hallucinated },
+          {
+            role: "assistant",
+            content: p.content,
+            was_hallucinated: p.was_hallucinated,
+            hallucination_note: p.hallucination_note,
+            hallucination_snippet: p.hallucination_snippet,
+          },
         ]);
         setAiBusy(false);
       } else if (e.type === "code_run") {
